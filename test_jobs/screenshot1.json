@@ -1,0 +1,21 @@
+{
+    "params": {
+        "id": 822006,
+        "project_id": 22441,
+        "url": "https:\/\/diffy.website",
+        "breakpoint": 1200,
+        "args": {
+            "disable_css_animation": true,
+            "stabilization": true,
+            "workers_number": 30,
+            "delay_between_screenshots": null
+        },
+        "base_url": "https:\/\/diffy.website",
+        "user_id": 3380,
+        "user_email": "diffy.tutorials@diffy.website",
+        "basicAuth": {
+            "user": "",
+            "password": ""
+        }
+    }
+}
