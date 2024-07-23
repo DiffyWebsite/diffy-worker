@@ -17,14 +17,14 @@ let api
 const process = require("process");
 const fs = require("fs");
 
-const apiKey = process.env.API_KEY || ''
+const apiKey = process.env.DIFFY_API_KEY || ''
 if (apiKey == '') {
-  console.error('Add Diffy API key to .env file. API_KEY=XXX');
+  console.error('Add Diffy API key to .env file. DIFFY_API_KEY=XXX');
   return;
 }
-const projectId = process.env.PROJECT_ID || ''
+const projectId = process.env.DIFFY_PROJECT_ID || ''
 if (projectId == '') {
-  console.error('Add Diffy API project ID .env file. PROJECT_ID=XXX');
+  console.error('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX');
   return;
 }
 
