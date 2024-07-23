@@ -3,7 +3,7 @@ FROM --platform=linux/arm64 ubuntu:22.04
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update
 RUN apt-get install -y gconf-service apt-transport-https ca-certificates libssl-dev wget libasound2 libatk1.0-0 libcairo2 libcups2 libfontconfig1 libgdk-pixbuf2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libxss1 fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils curl build-essential tar gzip findutils net-tools dnsutils telnet ngrep tcpdump
-RUN apt-get install software-properties-common -y
+RUN apt-get install -y software-properties-common unzip
 RUN add-apt-repository ppa:saiarcot895/chromium-dev
 
 RUN apt update
