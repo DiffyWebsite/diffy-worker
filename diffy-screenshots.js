@@ -34,14 +34,14 @@ const diffyWebsiteUrl = 'https://app.diffy.website/#'
 var argv = require('minimist')(process.argv.slice(2));
 
 
-async function end () {
+async function end (code = 1) {
   try {
     // Remove tmp files.
     // func.cleanTmpDir()
   } catch (e) {
     console.error(e.message)
   }
-  process.exit(1)
+  process.exit(code)
 }
 
 process.once('SIGTERM', end)
@@ -100,7 +100,7 @@ process.on('unhandledRejection', async (reason, p) => {
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
     console.log('Diffy screenshot url: ', `${diffyWebsiteUrl}/snapshots/${screenshotId}`)
 
-    await end()
+    await end(0)
   } catch (e) {
     console.error('ERROR:', e.message)
     await end()
