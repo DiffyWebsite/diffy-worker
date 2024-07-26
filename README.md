@@ -50,6 +50,14 @@ fc-cache -f -v
 To check fonts
 fc-match system-ui
 
+### Make changes to the container
+
+Once you have done your changes you can publish newer version of container to Docker Hub:
+```shell
+docker tag diffy-worker-node diffywebsite2/screenshot-worker
+docker push diffywebsite2/screenshot-worker
+```
+
 ### Chrome version validation
 
 To validate Chrome run screenshot on https://vrt-test.diffy.website

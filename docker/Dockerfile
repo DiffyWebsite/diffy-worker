@@ -1,4 +1,6 @@
-FROM --platform=linux/arm64 ubuntu:22.04
+FROM ubuntu:22.04
+
+SHELL ["/bin/bash", "--login", "-i", "-c"]
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update
@@ -9,19 +11,9 @@ RUN add-apt-repository ppa:saiarcot895/chromium-dev
 RUN apt update
 RUN apt-get install -y chromium-browser
 
-ENV NODE_VERSION 22.5.1
-
-RUN ARCH=arm64 \
-  && curl -fsSLO --compressed "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$ARCH.tar.xz" \
-  && tar -xJf "node-v$NODE_VERSION-linux-$ARCH.tar.xz" -C /usr/local --strip-components=1 --no-same-owner \
-  && rm "node-v$NODE_VERSION-linux-$ARCH.tar.xz" \
-  && ln -s /usr/local/bin/node /usr/local/bin/nodejs \
-  # smoke tests
-  && node --version \
-  && npm --version
-
-RUN ARCH=arm64 \
-  && npm install -g npm@10.8.2
+# Install node with nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+RUN source /root/.bashrc && nvm install 22.5.1
 
 RUN apt install -y imagemagick
 
