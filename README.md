@@ -53,10 +53,12 @@ fc-match system-ui
 ### Make changes to the container
 
 Once you have done your changes you can publish newer version of container to Docker Hub https://ddev.readthedocs.io/en/stable/developers/release-management/#pushing-docker-images-manually
+
 ```shell
 cd docker
 docker buildx use ddev-builder-multi
-make push VERSION=<release_version> DOCKER_ARGS=--no-cache
+# Adjust the tag
+make VERSION=0.0.1 push
 ```
 
 ### Chrome version validation
