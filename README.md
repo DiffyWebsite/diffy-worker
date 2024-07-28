@@ -20,6 +20,26 @@ To start an app with a test job
 node index.js --file=test_jobs/screenshot1.json
 ```
 
+### Release container to docker hub
+```shell
+cd docker
+make VERSION=<release_version> push
+```
+
+If you get an error 
+```
+ERROR: Multi-platform build is not supported for the docker driver.
+Switch to a different driver, or turn on the containerd image store, and try again.
+```
+
+Run 
+```
+docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
+docker buildx inspect --bootstrap
+```
+
+### Puppeteer & Chrome
+
 List of compatible versions of puppeteer and Chrome
 https://pptr.dev/supported-browsers
 
