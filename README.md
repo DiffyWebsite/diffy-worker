@@ -5,13 +5,13 @@ By open sourcing it we allow local development integrations (i.e. DDEV, Lando).
 To start container (default platform is needed if you are on M1 processor)
 
 ```shell
-docker-compose -f docker-compose.yml up
+docker compose -f docker-compose.yml up
 ```
 
 Login to container
 
 ```shell
-docker-compose -f docker-compose.yml exec node bash
+docker compose -f docker-compose.yml exec node bash
 cd /app
 ```
 
@@ -36,6 +36,17 @@ Run
 ```
 docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
 docker buildx inspect --bootstrap
+```
+
+If you see when creating buildx image
+```shell
+ERROR: existing instance for "multi-platform-builder" but no append mode, specify the node name to make changes for existing instances
+```
+
+you can remove it
+```shell
+docker buildx ls
+docker buildx rm multi-platform-builder
 ```
 
 ### Puppeteer & Chrome

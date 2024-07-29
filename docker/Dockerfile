@@ -1,6 +1,8 @@
 FROM ubuntu:22.04
 
 SHELL ["/bin/bash", "--login", "-i", "-c"]
+RUN rm /bin/sh && ln -s /bin/bash /bin/sh
+RUN rm /bin/dash && ln -s /bin/bash /bin/dash
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update
@@ -14,6 +16,9 @@ RUN apt-get install -y chromium-browser
 # Install node with nvm
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 RUN source /root/.bashrc && nvm install 22.5.1
+
+RUN ln -s /root/.nvm/versions/node/v22.5.1/bin/node /usr/bin/node
+RUN ln -s /root/.nvm/versions/node/v22.5.1/bin/npm /usr/bin/npm
 
 RUN apt install -y imagemagick
 
