@@ -13,12 +13,10 @@ RUN add-apt-repository ppa:saiarcot895/chromium-dev
 RUN apt update
 RUN apt-get install -y chromium-browser
 
-# Install node with nvm
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-RUN source /root/.bashrc && nvm install 22.5.1
-
-RUN ln -s /root/.nvm/versions/node/v22.5.1/bin/node /usr/bin/node
-RUN ln -s /root/.nvm/versions/node/v22.5.1/bin/npm /usr/bin/npm
+# Install node with n
+RUN curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s lts
+RUN npm install -g n
+RUN n 22.5.1
 
 RUN apt install -y imagemagick
 

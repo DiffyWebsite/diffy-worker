@@ -27,13 +27,13 @@ make VERSION=<release_version> push
 ```
 
 If you get an error 
-```
+```shell
 ERROR: Multi-platform build is not supported for the docker driver.
 Switch to a different driver, or turn on the containerd image store, and try again.
 ```
 
 Run 
-```
+```shell
 docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
 docker buildx inspect --bootstrap
 ```
