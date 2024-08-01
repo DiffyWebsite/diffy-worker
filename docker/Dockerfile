@@ -4,7 +4,11 @@ SHELL ["/bin/bash", "--login", "-i", "-c"]
 RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 RUN rm /bin/dash && ln -s /bin/bash /bin/dash
 
+WORKDIR /diffy-worker
+VOLUME /diffy-worker
+
 ENV DEBIAN_FRONTEND=noninteractive
+ENV NODE_NO_WARNINGS=1
 RUN apt-get update
 RUN apt-get install -y gconf-service apt-transport-https ca-certificates libssl-dev wget libasound2 libatk1.0-0 libcairo2 libcups2 libfontconfig1 libgdk-pixbuf2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libxss1 fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils curl build-essential tar gzip findutils net-tools dnsutils telnet ngrep tcpdump
 RUN apt-get install -y software-properties-common unzip
@@ -25,3 +29,4 @@ RUN apt-get install -y --no-install-recommends fontconfig fonts-ipafont-gothic f
 RUN fc-cache -f -v
 
 #ENTRYPOINT ["/bin/sh", "-c", "bash"]
+CMD ["tail", "-f", "/dev/null"]

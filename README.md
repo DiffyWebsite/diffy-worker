@@ -11,8 +11,7 @@ docker compose -f docker-compose.yml up
 Login to container
 
 ```shell
-docker compose -f docker-compose.yml exec node bash
-cd /app
+docker compose -f docker-compose.yml exec diffy bash
 ```
 
 To start an app with a test job

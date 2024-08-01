@@ -1,7 +1,7 @@
 services:
-    node:
+    diffy:
         build: './docker/'
         volumes:
-            - "./:/app"
+            - "./:/diffy-worker"
         command: tail -f /dev/null
         tty: true
