@@ -34,7 +34,6 @@ Switch to a different driver, or turn on the containerd image store, and try aga
 Run 
 ```shell
 docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
-docker buildx inspect --bootstrap
 ```
 
 If you see when creating buildx image

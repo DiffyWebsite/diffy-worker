@@ -22,6 +22,11 @@ RUN curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s lts
 RUN npm install -g n
 RUN n 22.5.1
 
+RUN n rm 20
+
+# In case non-root user runs "npm install" we need to make sure /.cache directory exists and writeable.
+RUN mkdir /.cache && chmod ugo+w /.cache
+
 RUN apt install -y imagemagick
 
 # Install all the fonts.
