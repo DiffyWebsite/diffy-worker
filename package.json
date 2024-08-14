@@ -12,7 +12,6 @@
     },
     "dependencies": {
         "aws-sdk": "^2.1621.0",
-        "axios": "^1.7.3",
         "bluebird": "^3.7.2",
         "dotenv": "^16.4.5",
         "fs-extra": "^8.1.0",
