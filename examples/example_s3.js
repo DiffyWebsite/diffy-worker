@@ -1,4 +1,4 @@
-require('dotenv').config();
+
 const process = require('process');
 
 const uploadS3 = require("../lib/uploadS3");

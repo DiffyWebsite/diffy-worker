@@ -1,10 +1,6 @@
 // Example to run
 // node diffy-screenshots.js --url=https://diffy.website
 
-const debug = false
-
-require('dotenv').config();
-
 const { Logger } = require('./lib/logger')
 const logger = new Logger(debug);
 

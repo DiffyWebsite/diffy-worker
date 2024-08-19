@@ -4,8 +4,6 @@
 // file-content -- if we pass job file as json as parameter
 // output-filepath -- path to a file to save the results in json format. Used by wrapper.
 
-require('dotenv').config();
-
 const debug = false
 const timeout = 3 * 60 * 1000; // Timeout in milliseconds.
 

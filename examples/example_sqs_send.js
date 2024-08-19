@@ -1,4 +1,4 @@
-require('dotenv').config();
+
 const process = require('process');
 
 const { SqsSender, maxAttempts } = require('../lib/sqsSender')
