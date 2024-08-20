@@ -95,7 +95,7 @@ process.on('unhandledRejection', async (reason, p) => {
       uploadItems.push(uploadItem);
     });
 
-    await Promise.all(jobProcesses); // all or allSettled ?
+    await Promise.all(jobProcesses); // change to sequencial execution
 
     // Send screenshots to Diffy.
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
