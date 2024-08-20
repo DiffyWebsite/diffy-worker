@@ -4,7 +4,7 @@
 // file-content -- if we pass job file as json as parameter
 // output-filepath -- path to a file to save the results in json format. Used by wrapper.
 
-const debug = false
+const debug = !!process.env.DEBUG;
 const timeout = 3 * 60 * 1000; // Timeout in milliseconds.
 
 const process = require('process');
@@ -55,7 +55,7 @@ if (jobFileContent) {
   }
 }
 
-async function end () {
+function end () {
   try {
     // Remove tmp files.
     // func.cleanTmpDir()
@@ -64,6 +64,7 @@ async function end () {
   }
   process.exit(1)
 }
+
 process.once('SIGTERM', end)
 process.once('SIGINT', end)
 process.on('uncaughtException', (e) => {
@@ -83,7 +84,6 @@ const logger = new Logger();
   }
 
   let browser = null
-  let data = null
   let results = []
   let handlerTimeExecuteStart = performance.now();
   const executor = new Executor(debug, local);
@@ -105,7 +105,7 @@ const logger = new Logger();
   try {
     const proxy = process.env.PROXY;
     browser = await chromiumBrowser.getBrowser(proxy)
-    results = await run(message, browser, executor, data);
+    results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
       console.log(results);
@@ -155,17 +155,15 @@ const closeBrowser = async (browser) => {
  * @param message
  * @param browser
  * @param executor
- * @param data
  * @return {Promise<[]>}
  */
-const run = async (message, browser, executor, data) => {
-  let result = null
+const run = async (message, browser, executor) => {
   const results = []
   if (message.hasOwnProperty('Body')) {
-    data = JSON.parse(message.Body);
+    const data = JSON.parse(message.Body);
     data.params.local = message.local;
 
-    result = await executor.run(browser, data)
+    const result = await executor.run(browser, data)
     results.push(result)
   }
   return results
