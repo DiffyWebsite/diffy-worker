@@ -16,7 +16,12 @@ docker compose -f docker-compose.yml exec diffy bash
 
 To start an app with a test job
 ```shell
-node index.js --file=test_jobs/screenshot1.json
+node --env-file=.env index.js --file=test_jobs/screenshot1.json
+```
+
+To start an app with a test job without using the cloud (to save files locally)
+```shell
+node --env-file=.env index.js --local=true --file=test_jobs/screenshot1.json
 ```
 
 ### Release container to docker hub

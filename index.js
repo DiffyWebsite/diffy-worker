@@ -15,7 +15,7 @@ const { Logger } = require('./lib/logger')
 const { ChromiumBrowser } = require('./lib/chromiumBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
 
-var argv = require('minimist')(process.argv.slice(2));
+const argv = require('minimist')(process.argv.slice(2));
 const local = argv.local ? argv.local : false;
 const jobFile = argv.file !== undefined;
 const jobFileContent = argv['file-content'] !== undefined ? argv['file-content'] : false;
@@ -160,7 +160,7 @@ const closeBrowser = async (browser) => {
  */
 const run = async (message, browser, executor) => {
   const results = []
-  if (message.hasOwnProperty('Body')) {
+  if (Object.hasOwn(message,'Body')) {
     const data = JSON.parse(message.Body);
     data.params.local = message.local;
 
