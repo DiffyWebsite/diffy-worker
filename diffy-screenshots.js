@@ -1,9 +1,6 @@
 // Example to run
 // node diffy-screenshots.js --url=https://diffy.website
-
-const debug = false
-
-require('dotenv').config();
+const debug = !!process.env.DEBUG;
 
 const { Logger } = require('./lib/logger')
 const logger = new Logger(debug);
@@ -12,10 +9,9 @@ const { Jobs } = require('./lib/jobs')
 const jobs = new Jobs(logger)
 
 const { Api } = require('./lib/api.js')
-let api
 
 const process = require("process");
-const fs = require("fs");
+const fs = require("fs/promises");
 
 const apiKey = process.env.DIFFY_API_KEY || ''
 if (apiKey == '') {
@@ -31,7 +27,7 @@ if (projectId == '') {
 const diffyUrl = 'https://app.diffy.website/api'
 const diffyWebsiteUrl = 'https://app.diffy.website/#'
 
-var argv = require('minimist')(process.argv.slice(2));
+const argv = require('minimist')(process.argv.slice(2));
 
 
 async function end (code = 1) {
@@ -63,37 +59,44 @@ process.on('unhandledRejection', async (reason, p) => {
   }
   const screenshotName = argv['screenshot-name'] ? argv['screenshot-name'] : argv.url;
   try {
-    api = new Api(diffyUrl, apiKey, projectId, logger)
+    const api = new Api(diffyUrl, apiKey, projectId, logger)
     await api.login()
     const project = await api.getProject()
     const jobsList = jobs.prepareJobs(argv.url, project)
 
-    const execSync = require('node:child_process').execSync;
+    const util = require('node:util');
+    const exec = util.promisify(require('node:child_process').exec);
+
     const outputFilepath = '/tmp/screenshot-results.json';
     const inputFilepath = '/tmp/screenshot-input.json';
     let uploadItems = [];
-    for (let i = 0; i < jobsList.length; i++) {
-      let jsonJob = JSON.stringify(jobsList[i]);
+
+    const jobProcesses = jobsList.map(async job => {
+      let jsonJob = JSON.stringify(job);
       try {
-        fs.writeFileSync(inputFilepath, jsonJob);
+        await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
         console.error(err);
       }
       console.log('Staring screenshot ' + (i + 1) + ' of ' + jobsList.length);
-      await execSync('node ./index.js --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
+      await exec('node ./index.js --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
       console.log('Completed screenshot ' + (i + 1) + ' of ' + jobsList.length);
-      const resultsContent = fs.readFileSync(outputFilepath, 'utf8');
+      const resultsContent = fs.readFile(outputFilepath, 'utf8');
       console.log(resultsContent);
       let result = JSON.parse(resultsContent);
       let uploadItem = {
         status: true,
-        breakpoint: jobsList[i].params.breakpoint,
-        uri: jobsList[i].params.uri,
+        breakpoint: job.params.breakpoint,
+        uri: job.params.uri,
         filename: result.screenshot,
         htmlFilename: result.html,
         jsConsoleFilename: result.jsConsole
       };
       uploadItems.push(uploadItem);
+    });
+
+    for (let jobProcess of jobProcesses) {
+      await jobProcess;
     }
 
     // Send screenshots to Diffy.
