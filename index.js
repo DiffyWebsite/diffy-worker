@@ -4,7 +4,7 @@
 // file-content -- if we pass job file as json as parameter
 // output-filepath -- path to a file to save the results in json format. Used by wrapper.
 
-const timeout = 3 * 60 * 1000; // Timeout in milliseconds.
+const timeout = 10 * 60 * 1000; // 10 minutes timeout
 
 const process = require('process');
 const debug = !!process.env.DEBUG;
