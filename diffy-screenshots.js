@@ -1,5 +1,6 @@
 // Example to run
 // node diffy-screenshots.js --url=https://diffy.website
+const process = require("process");
 const debug = !!process.env.DEBUG;
 
 const { Logger } = require('./lib/logger')
@@ -9,8 +10,6 @@ const { Jobs } = require('./lib/jobs')
 const jobs = new Jobs(logger)
 
 const { Api } = require('./lib/api.js')
-
-const process = require("process");
 const fs = require("fs/promises");
 
 const apiKey = process.env.DIFFY_API_KEY || ''
@@ -71,17 +70,17 @@ process.on('unhandledRejection', async (reason, p) => {
     const inputFilepath = '/tmp/screenshot-input.json';
     let uploadItems = [];
 
-    const jobProcesses = jobsList.map(async job => {
+    const jobProcesses = jobsList.map(async (job, index) => {
       let jsonJob = JSON.stringify(job);
       try {
         await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
         console.error(err);
       }
-      console.log('Staring screenshot ' + (i + 1) + ' of ' + jobsList.length);
-      await exec('node ./index.js --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
-      console.log('Completed screenshot ' + (i + 1) + ' of ' + jobsList.length);
-      const resultsContent = fs.readFile(outputFilepath, 'utf8');
+      console.log('Staring screenshot ' + (index + 1) + ' of ' + jobsList.length);
+      await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
+      console.log('Completed screenshot ' + (index + 1) + ' of ' + jobsList.length);
+      const resultsContent = await fs.readFile(outputFilepath, 'utf8');
       console.log(resultsContent);
       let result = JSON.parse(resultsContent);
       let uploadItem = {
