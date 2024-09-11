@@ -27,8 +27,6 @@ RUN n rm 20
 # In case non-root user runs "npm install" we need to make sure /.cache directory exists and writeable.
 RUN mkdir /.cache && chmod ugo+w /.cache
 
-RUN apt install -y imagemagick
-
 # Install all the fonts.
 RUN apt-get install -y --no-install-recommends fontconfig fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst ttf-mscorefonts-installer fonts-ubuntu  fonts-noto-color-emoji  fonts-noto-cjk fonts-ipafont-gothic fonts-wqy-zenhei fonts-kacst fonts-freefont-ttf fonts-liberation fonts-thai-tlwg fonts-indic fonts-lato fonts-open-sans fonts-roboto fonts-dejavu-core
 RUN fc-cache -f -v

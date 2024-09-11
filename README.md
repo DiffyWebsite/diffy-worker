@@ -19,6 +19,11 @@ To start an app with a test job
 node --env-file=.env index.js --file=test_jobs/screenshot1.json
 ```
 
+To start an app with a test job in the debug mode
+```shell
+node --inspect-brk=0.0.0.0:9229 --env-file=.env index.js --file=test_jobs/screenshot1.json
+```
+
 To start an app with a test job without using the cloud (to save files locally)
 ```shell
 node --env-file=.env index.js --local=true --file=test_jobs/screenshot1.json
