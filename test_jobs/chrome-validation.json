@@ -1,0 +1,50 @@
+{
+    "params": {
+        
+        "id": 972615,
+        "project_id": 23938,
+        "url": "https:\/\/vrt-test.diffy.website",
+        "breakpoint": 1200,
+        "args": {
+            "delay_before_screenshot": 10,
+            "scroll_step": 40,
+            "scroll_step_delay": 200,
+            "headers": [
+                {
+                    "header": "User-Agent",
+                    "value": "Mozilla\/5.0 (Macintosh; Intel Mac OS X 10.11; rv:46.0) Gecko\/20100101 Firefox\/46.0"
+                }
+            ],
+            "cookies": "CUSTOM=cookie;",
+            "js_code": "var div = document.getElementById('custom-javascript');\ndiv.innerHTML += ' Extra content added!';",
+            "css_code": "#custom-css {\n  background-color: red;\n}",
+            "disable_css_animation": true,
+            "stabilization": true,
+            "stabilization_code": "(async () => {\n    console.log('[HeightStabilization] Starting');\n\n    await page.evaluate(async () => {\n        const pageStyle = document.createElement('style');\n        pageStyle.textContent = `\n              html, body { height: auto !important; min-height: 100vh !important; }\n            `;\n        document.head.appendChild(pageStyle);\n\n        \/\/ pause and reset time for all <video> tags\n        document.querySelectorAll('video')\n          .forEach(video => {\n            try {\n              video.pause();\n              video.currentTime = 0;\n            } catch (e) {\n            }\n          });\n\n        \/\/ destroy jarallax plugin\n        if (typeof window.jarallax !== 'undefined') {\n          try {\n            window.jarallax(document.querySelectorAll('.jarallax'), 'destroy');\n          } catch (e) {\n          }\n        }\n\n        \/\/ swiper\n        document.querySelectorAll('.swiper,.swiper-container')\n          .forEach((element) => {\n            if (typeof element.swiper !== 'undefined') {\n              try {\n                element.swiper.autoplay.stop();\n                element.swiper.slideTo(1, 0);\n              } catch (e) {\n              }\n\n              try {\n                element.swiper.setProgress(0, 0);\n              } catch (e) {\n              }\n            }\n          });\n\n        \/\/ stop vimeo videos\n        if (typeof Vimeo !== 'undefined') {\n          document.querySelectorAll('iframe[src*=\"vimeo\"]')\n            .forEach((iframe) => {\n              try {\n                (new Vimeo.Player(iframe)).destroy();\n              } catch (e) {\n              }\n            });\n        }\n\n        \/\/ Stop YouTube videos\n        document.querySelectorAll('iframe[src*=\"youtube\"]')\n          .forEach((iframe) => {\n            iframe.contentWindow.postMessage('{\"event\":\"command\",\"func\":\"stopVideo\",\"args\":\"\"}', '*');\n          });\n\n        \/\/ Stop Intercom\n        if (typeof Intercom !== 'undefined') {\n          try {\n            Intercom('shutdown');\n          } catch (e) {\n          }\n        }\n\n        \/\/ Remove cookies modals \/ chats \/ captcha\n        document.querySelectorAll('#CybotCookiebotDialog,#velaro-container,iframe[title=\"reCAPTCHA\"],#hs-eu-cookie-confirmation,#onetrust-consent-sdk,.cookie-notice-overlay')\n          .forEach((element) => {\n            element.remove();\n          });\n\n        \/\/ Stop presto video player (https:\/\/github.com\/ygerasimov\/diffy-pm\/issues\/358)\n        document.querySelectorAll('presto-player').forEach((el) => {\n          try {\n            el.stop()\n          } catch (e) {\n          }\n        });\n\n        \/\/ https:\/\/wppopupmaker.com\/\n        const pmStyle = document.createElement('style');\n        pmStyle.textContent = `\n              html.pum-open { overflow: auto!important; }\n              .pum-overlay { display: none!important; }\n            `;\n        document.head.appendChild(pmStyle);\n      })\n\n      \/\/ hide youtube videos\n      await func.hideBanners(page, {args: {elements: ['iframe[src*=\"youtube.com\"]']}})\n\n      await page.evaluate(async () => {\n        window.diffyElementsHeights = []\n\n        await (async function (node, elementsHeights) {\n          const viewportHeight = window.innerHeight;\n\n          if (viewportHeight && node.childNodes.length) {\n            for (const child of node.childNodes) {\n              if (child.nodeType === Node.ELEMENT_NODE) {\n                \/\/ @TODO skip hidden elements (modals, mobile swipe menus, etc.)\n                if (\n                  !child.offsetHeight ||\n                  window.getComputedStyle(child).getPropertyValue('opacity') <= 0 ||\n                  ['script', 'noscript', 'input', 'br', 'hr'].includes(child.tagName.toLowerCase())\n                ) {\n                  continue;\n                }\n\n                const element = {\n                  node: child,\n                  height: child.offsetHeight,\n                  viewportRatio: (child.offsetHeight \/ viewportHeight).toFixed(2),\n                  childNodes: [],\n                }\n\n                elementsHeights.push(element)\n\n                if (child.childNodes && child.childNodes.length) {\n                  await arguments.callee(child, element.childNodes)\n                }\n              }\n            }\n          }\n        })(document.body, window.diffyElementsHeights);\n\n        console.log('[HeightStabilization] Found: ' + window.diffyElementsHeights.length)\n      });\n})();",
+            "night_mode": true,
+            "retina_images": false,
+            "fixtures": [
+                {
+                    "type": "title",
+                    "selector": "#timestamp",
+                    "content": "Nullam dapibus lobortis nunc, eu mattis orci ultrices eu."
+                }
+            ],
+            "workers_number": 30,
+            "delay_between_screenshots": null,
+            "elements": [
+                "#mask"
+            ],
+            "cut_elements": [
+                "#remove"
+            ]
+        },
+        "base_url": "https:\/\/vrt-test.diffy.website",
+        "user_id": 3380,
+        "user_email": "diffy.tutorials@diffy.website",
+        "basicAuth": {
+            "user": "",
+            "password": ""
+        }
+    }
+}
