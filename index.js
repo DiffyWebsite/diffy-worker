@@ -24,6 +24,8 @@ const isSqs = !jobFile && !jobFileContent;
 
 const sqsSender = new SqsSender(debug, local);
 
+const logger = new Logger();
+
 let message;
 
 const fs = require('fs');
@@ -38,7 +40,7 @@ if (jobFile) {
       'local': local
     };
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 }
 
@@ -52,7 +54,7 @@ if (jobFileContent) {
       'local': local
     };
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 }
 
@@ -61,7 +63,7 @@ function end () {
     // Remove tmp files.
     // func.cleanTmpDir()
   } catch (e) {
-    console.error(e.message)
+    logger.error(e)
   }
   process.exit(1)
 }
@@ -69,14 +71,12 @@ function end () {
 process.once('SIGTERM', end)
 process.once('SIGINT', end)
 process.on('uncaughtException', (e) => {
-  console.error('Unhandled exception:', e)
+  logger.error(e)
   process.exit(6)
 })
 process.on('unhandledRejection', (reason, p) => {
-  console.error('Unhandled Rejection at: Promise', p, 'reason:', reason)
+  logger.error(`Unhandled Rejection at: Promise ${p}`, reason)
 })
-
-const logger = new Logger();
 
 (async () => {
   if (isSqs) {
@@ -114,7 +114,7 @@ const logger = new Logger();
     if (outputFilepath) {
       fs.writeFile(outputFilepath, JSON.stringify(results[0]), err => {
         if (err) {
-          console.error(err);
+          logger.error(err);
         }
       });
     }
@@ -145,7 +145,7 @@ const closeBrowser = async (browser) => {
     try {
       await browser.close()
     } catch (e) {
-      logger.error('Can\'t close Browser', e)
+      logger.error(e)
     }
   }
 }
