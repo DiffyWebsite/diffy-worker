@@ -76,7 +76,7 @@ process.on('uncaughtException', (e) => {
 })
 process.on('unhandledRejection', (reason, p) => {
   logger.error(`Unhandled Rejection at: Promise ${p}`, reason)
-})
+});
 
 (async () => {
   if (isSqs) {
