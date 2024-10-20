@@ -8,3 +8,5 @@ services:
         tty: true
         ports:
             - "9229:9229"
+        env_file:
+            -   .env

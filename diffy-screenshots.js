@@ -34,7 +34,7 @@ async function end (code = 1) {
     // Remove tmp files.
     // func.cleanTmpDir()
   } catch (e) {
-    console.error(e.message)
+    logger.error(e)
   }
   process.exit(code)
 }
@@ -43,12 +43,12 @@ process.once('SIGTERM', end)
 process.once('SIGINT', end)
 
 process.on('uncaughtException', async (e) => {
-  console.error('Unhandled exception:', e)
+  logger.error(e)
   await end()
 });
 
 process.on('unhandledRejection', async (reason, p) => {
-  console.error('Unhandled Rejection at: Promise', p, 'reason:', reason)
+  logger.error(`Unhandled Rejection at: Promise ${p}`, reason)
   await end()
 });
 
@@ -76,7 +76,7 @@ process.on('unhandledRejection', async (reason, p) => {
       try {
         await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
-        console.error(err);
+        logger.error(err);
       }
       console.log('Starting screenshot ' + (index + 1) + ' of ' + jobsList.length);
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
@@ -101,7 +101,7 @@ process.on('unhandledRejection', async (reason, p) => {
 
     await end(0)
   } catch (e) {
-    console.error('ERROR:', e.message)
+    logger.error(e)
     await end()
   }
 })()
