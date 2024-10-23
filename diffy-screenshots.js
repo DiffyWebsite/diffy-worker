@@ -12,19 +12,19 @@ const jobs = new Jobs(logger)
 const { Api } = require('./lib/api.js')
 const fs = require("fs/promises");
 
-const apiKey = process.env.DIFFY_API_KEY || ''
+const apiKey = process.env.DIFFY_API_KEY || '3d609a9c4cfb19ce90e3a2b660e2b614'
 if (apiKey == '') {
   logger.error('Add Diffy API key to .env file. DIFFY_API_KEY=XXX');
   return;
 }
-const projectId = process.env.DIFFY_PROJECT_ID || ''
+const projectId = process.env.DIFFY_PROJECT_ID || '252'
 if (projectId == '') {
   logger.error('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX');
   return;
 }
 
-const diffyUrl = 'https://app.diffy.website/api'
-const diffyWebsiteUrl = 'https://app.diffy.website/#'
+const diffyUrl = 'https://stage.diffy.website/api'
+const diffyWebsiteUrl = 'https://stage.diffy.website/#'
 
 const argv = require('minimist')(process.argv.slice(2));
 
