@@ -27,8 +27,8 @@ const diffyUrl = 'https://app.diffy.website/api'
 const diffyWebsiteUrl = 'https://app.diffy.website/#'
 
 // Staging URLs
-// const diffyUrl = 'https://app.diffy.website/api'
-// const diffyWebsiteUrl = 'https://app.diffy.website/#'
+// const diffyUrl = 'https://stage.diffy.website/api'
+// const diffyWebsiteUrl = 'https://stage.diffy.website/#'
 
 const argv = require('minimist')(process.argv.slice(2));
 
