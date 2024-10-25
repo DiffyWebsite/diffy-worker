@@ -23,6 +23,5 @@ try {
 (async () => {
   const sqsSender = new SqsSender(true, false);
   const result = await sqsSender.sendSQSJob(JSON.parse(fileContent));
-  logger.info('Job is sent ', result);
-  logger.info('Job is sent ', fileContent);
+  logger.log('Job is sent ', result, fileContent);
 })()

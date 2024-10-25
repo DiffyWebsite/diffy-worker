@@ -82,7 +82,7 @@ process.on('unhandledRejection', async (reason, p) => {
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
       logger.info('Completed screenshot ' + (index + 1) + ' of ' + jobsList.length);
       const resultsContent = await fs.readFile(outputFilepath, 'utf8');
-      logger.info('Output file content', resultsContent);
+      logger.log('Output file content', resultsContent);
       let result = JSON.parse(resultsContent);
       let uploadItem = {
         status: true,

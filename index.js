@@ -95,7 +95,7 @@ process.on('unhandledRejection', (reason, p) => {
     try {
       const result = await executor.timeout(handlerTimeExecuteStart)
       executor.shutdown()
-      logger.info('Timeout', result);
+      logger.log('Timeout', result);
       process.exit(1); // Failure code returned.
     } catch (e) {
       logger.error('Failed to shut down executor', e);
@@ -109,7 +109,7 @@ process.on('unhandledRejection', (reason, p) => {
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
-      logger.info('Executor result', results);
+      logger.log('Executor result', results);
     }
     if (outputFilepath) {
       fs.writeFile(outputFilepath, JSON.stringify(results[0]), err => {
