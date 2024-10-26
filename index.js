@@ -24,7 +24,7 @@ const isSqs = !jobFile && !jobFileContent;
 
 const sqsSender = new SqsSender(debug, local);
 
-const logger = new Logger();
+const logger = new Logger(debug);
 
 let message;
 
@@ -40,7 +40,7 @@ if (jobFile) {
       'local': local
     };
   } catch (err) {
-    logger.error(err);
+    logger.error('Failed to read file', err);
   }
 }
 
@@ -54,7 +54,7 @@ if (jobFileContent) {
       'local': local
     };
   } catch (err) {
-    logger.error(err);
+    logger.error('Failed to accept job message', err);
   }
 }
 
@@ -63,7 +63,7 @@ function end () {
     // Remove tmp files.
     // func.cleanTmpDir()
   } catch (e) {
-    logger.error(e)
+    logger.error('Failed to clean tmp directory', e)
   }
   process.exit(1)
 }
@@ -71,11 +71,11 @@ function end () {
 process.once('SIGTERM', end)
 process.once('SIGINT', end)
 process.on('uncaughtException', (e) => {
-  logger.error(e)
+  logger.error('UncaughtException', e)
   process.exit(6)
 })
 process.on('unhandledRejection', (reason, p) => {
-  logger.error(`Unhandled Rejection at: Promise ${p}`, reason)
+  logger.error('Unhandled Rejection at: Promise', p, reason)
 });
 
 (async () => {
@@ -95,10 +95,10 @@ process.on('unhandledRejection', (reason, p) => {
     try {
       const result = await executor.timeout(handlerTimeExecuteStart)
       executor.shutdown()
-      console.log(result);
+      logger.log('Timeout', result);
       process.exit(1); // Failure code returned.
     } catch (e) {
-      console.log(e);
+      logger.error('Failed to shut down executor', e);
       process.exit(1); // Failure code returned.
     }
   }, timeout);
@@ -109,19 +109,19 @@ process.on('unhandledRejection', (reason, p) => {
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
-      console.log(results);
+      logger.log('Executor result', results);
     }
     if (outputFilepath) {
       fs.writeFile(outputFilepath, JSON.stringify(results[0]), err => {
         if (err) {
-          logger.error(err);
+          logger.error('Failed to output file', err);
         }
       });
     }
   } catch (err) {
     await closeBrowser(browser)
     await chromiumBrowser.closeProxy()
-    return console.log(err)
+    return logger.error('Failed to run executor', err)
   }
 
   clearTimeout(shutdownTimeout)
@@ -145,7 +145,7 @@ const closeBrowser = async (browser) => {
     try {
       await browser.close()
     } catch (e) {
-      logger.error(e)
+      logger.error('Failed to close browser', e)
     }
   }
 }
