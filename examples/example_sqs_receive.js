@@ -10,7 +10,7 @@ const logger = new Logger(debug);
 (async () => {
   const sqsSender = new SqsSender(true, false);
   let messages = await sqsSender.fetchSQSJob();
-  logger.log('Received', messages);
+  logger.info('Received', messages);
 
   await sqsSender.deleteSQSMessage(messages[0]);
 })()
