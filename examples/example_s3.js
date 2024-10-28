@@ -13,5 +13,5 @@ const logger = new Logger(debug);
     throw new Error('Can\'t upload screenshot: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
   })
 
-  logger.log('S3 URL', s3Url);
+  logger.info('S3 URL', s3Url);
 })()
