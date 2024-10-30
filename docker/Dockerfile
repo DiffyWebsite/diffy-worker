@@ -20,7 +20,7 @@ RUN apt-get install -y chromium-browser
 # Install node with n
 RUN curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s lts
 RUN npm install -g n
-RUN n 22.5.1
+RUN n 20.10.0
 
 RUN n rm 20
 
