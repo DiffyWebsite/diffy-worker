@@ -81,7 +81,9 @@ process.on('unhandledRejection', (reason, p) => {
 (async () => {
   if (isSqs) {
     let messages = await sqsSender.fetchSQSJob();
-    message = messages[0];
+    if (messages) {
+      message = messages[0];
+    }
   }
 
   let browser = null
@@ -128,7 +130,7 @@ process.on('unhandledRejection', (reason, p) => {
   await closeBrowser(browser)
   await chromiumBrowser.closeProxy();
 
-  if (isSqs) {
+  if (isSqs && message) {
     await sqsSender.deleteSQSMessage(message);
   }
 })()
