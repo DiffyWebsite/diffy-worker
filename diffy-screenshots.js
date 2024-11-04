@@ -1,5 +1,5 @@
 // Example to run
-// node diffy-screenshots.js --url=https://diffy.website
+// node diffy-screenshots.js --url=https://live-nisenet.pantheonsite.io
 const process = require("process");
 const debug = !!process.env.DEBUG;
 
@@ -14,12 +14,10 @@ const fs = require("fs/promises");
 
 const apiKey = process.env.DIFFY_API_KEY || ''
 if (apiKey == '') {
-  logger.error('Add Diffy API key to .env file. DIFFY_API_KEY=XXX');
   return;
 }
 const projectId = process.env.DIFFY_PROJECT_ID || ''
 if (projectId == '') {
-  logger.error('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX');
   return;
 }
 
@@ -80,13 +78,13 @@ process.on('unhandledRejection', async (reason, p) => {
       try {
         await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
-        logger.error('Failed to write file', err);
+        logger.error(argv.url, 'Failed to write file', err);
       }
-      logger.info(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
+      logger.info(argv.url, `Starting screenshot ${(index + 1)} of ${jobsList.length}`);
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
-      logger.info(`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
+      logger.info(argv.url,`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
       const resultsContent = await fs.readFile(outputFilepath, 'utf8');
-      logger.info('Output file content', resultsContent);
+      logger.info(argv.url, 'Output file content', resultsContent);
       let result = JSON.parse(resultsContent);
       let uploadItem = {
         status: true,
@@ -101,11 +99,11 @@ process.on('unhandledRejection', async (reason, p) => {
 
     // Send screenshots to Diffy.
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
-    logger.info(`Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
+    logger.info(argv.url, `Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
 
     await end(0)
   } catch (e) {
-    logger.error('Failed to run executor', e)
+    logger.error(argv.url, 'Failed to run executor', e)
     await end()
   }
 })()
