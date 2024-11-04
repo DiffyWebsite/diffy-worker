@@ -26,6 +26,10 @@ if (projectId == '') {
 const diffyUrl = 'https://app.diffy.website/api'
 const diffyWebsiteUrl = 'https://app.diffy.website/#'
 
+// Staging URLs
+// const diffyUrl = 'https://stage.diffy.website/api'
+// const diffyWebsiteUrl = 'https://stage.diffy.website/#'
+
 const argv = require('minimist')(process.argv.slice(2));
 
 
@@ -78,9 +82,9 @@ process.on('unhandledRejection', async (reason, p) => {
       } catch (err) {
         logger.error('Failed to write file', err);
       }
-      logger.info('Starting screenshot ' + (index + 1) + ' of ' + jobsList.length);
+      logger.info(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
-      logger.info('Completed screenshot ' + (index + 1) + ' of ' + jobsList.length);
+      logger.info(`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
       const resultsContent = await fs.readFile(outputFilepath, 'utf8');
       logger.info('Output file content', resultsContent);
       let result = JSON.parse(resultsContent);
@@ -97,7 +101,7 @@ process.on('unhandledRejection', async (reason, p) => {
 
     // Send screenshots to Diffy.
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
-    logger.info('Diffy screenshot url: ', `${diffyWebsiteUrl}/snapshots/${screenshotId}`)
+    logger.info(`Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
 
     await end(0)
   } catch (e) {
