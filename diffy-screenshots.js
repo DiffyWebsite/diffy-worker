@@ -23,8 +23,8 @@ if (projectId == '') {
   return;
 }
 
-const diffyUrl = 'https://stage.diffy.website/api'
-const diffyWebsiteUrl = 'https://stage.diffy.website/#'
+const diffyUrl = 'https://app.diffy.website/api'
+const diffyWebsiteUrl = 'https://app.diffy.website/#'
 
 // Staging URLs
 // const diffyUrl = 'https://stage.diffy.website/api'
