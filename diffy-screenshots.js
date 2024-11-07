@@ -1,5 +1,5 @@
 // Example to run
-// node diffy-screenshots.js --url=https://live-nisenet.pantheonsite.io
+// node diffy-screenshots.js --url=https://diffy.website
 const process = require("process");
 const debug = !!process.env.DEBUG;
 
