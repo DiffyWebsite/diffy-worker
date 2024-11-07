@@ -14,15 +14,17 @@ const fs = require("fs/promises");
 
 const apiKey = process.env.DIFFY_API_KEY || ''
 if (apiKey == '') {
+  console.log('Add Diffy API key to .env file. DIFFY_API_KEY=XXX')
   return;
 }
 const projectId = process.env.DIFFY_PROJECT_ID || ''
 if (projectId == '') {
+  console.log('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX')
   return;
 }
 
-const diffyUrl = 'https://app.diffy.website/api'
-const diffyWebsiteUrl = 'https://app.diffy.website/#'
+const diffyUrl = 'https://stage.diffy.website/api'
+const diffyWebsiteUrl = 'https://stage.diffy.website/#'
 
 // Staging URLs
 // const diffyUrl = 'https://stage.diffy.website/api'
@@ -36,7 +38,7 @@ async function end (code = 1) {
     // Remove tmp files.
     // func.cleanTmpDir()
   } catch (e) {
-    logger.error('Failed to remove tmp files', e)
+    console.log('Failed to remove tmp files', e)
   }
   process.exit(code)
 }
@@ -45,18 +47,18 @@ process.once('SIGTERM', end)
 process.once('SIGINT', end)
 
 process.on('uncaughtException', async (e) => {
-  logger.error('UncaughtException', e)
+  console.log('UncaughtException', e)
   await end()
 });
 
 process.on('unhandledRejection', async (reason, p) => {
-  logger.error('Unhandled Rejection at: Promise', p, reason)
+  console.log('Unhandled Rejection at: Promise', p, reason)
   await end()
 });
 
 (async () => {
   if (argv.url === undefined) {
-    logger.error('Provide --url parameter. Example --url="https://diffy.website"');
+    console.log('Provide --url parameter. Example --url="https://diffy.website"');
   }
   const screenshotName = argv['screenshot-name'] ? argv['screenshot-name'] : argv.url;
   try {
@@ -78,13 +80,13 @@ process.on('unhandledRejection', async (reason, p) => {
       try {
         await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
-        logger.error(argv.url, 'Failed to write file', err);
+        console.log(argv.url, 'Failed to write file', err);
       }
-      logger.info(argv.url, `Starting screenshot ${(index + 1)} of ${jobsList.length}`);
+      console.log(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
-      logger.info(argv.url,`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
+      console.log(`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
       const resultsContent = await fs.readFile(outputFilepath, 'utf8');
-      logger.info(argv.url, 'Output file content', resultsContent);
+      console.log('Output file content', resultsContent);
       let result = JSON.parse(resultsContent);
       let uploadItem = {
         status: true,
@@ -99,11 +101,11 @@ process.on('unhandledRejection', async (reason, p) => {
 
     // Send screenshots to Diffy.
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
-    logger.info(argv.url, `Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
+    console.log(argv.url, `Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
 
     await end(0)
   } catch (e) {
-    logger.error(argv.url, 'Failed to run executor', e)
+    console.log(argv.url, 'Failed to run executor', e)
     await end()
   }
 })()
