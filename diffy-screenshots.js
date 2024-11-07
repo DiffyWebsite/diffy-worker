@@ -80,7 +80,7 @@ process.on('unhandledRejection', async (reason, p) => {
       try {
         await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
-        console.log(argv.url, 'Failed to write file', err);
+        console.log('Failed to write file', err);
       }
       console.log(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
@@ -101,11 +101,11 @@ process.on('unhandledRejection', async (reason, p) => {
 
     // Send screenshots to Diffy.
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
-    console.log(argv.url, `Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
+    console.log(`Diffy screenshot url: ${diffyWebsiteUrl}/snapshots/${screenshotId}`)
 
     await end(0)
   } catch (e) {
-    console.log(argv.url, 'Failed to run executor', e)
+    console.log('Failed to run executor', e)
     await end()
   }
 })()
