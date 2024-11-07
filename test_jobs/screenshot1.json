@@ -16,6 +16,7 @@
         "basicAuth": {
             "user": "",
             "password": ""
-        }
+        },
+        "mhtml": 1
     }
 }
