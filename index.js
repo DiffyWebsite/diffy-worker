@@ -123,10 +123,11 @@ process.on('unhandledRejection', (reason, p) => {
   } catch (err) {
     await closeBrowser(browser)
     await chromiumBrowser.closeProxy()
-    return logger.error('Failed to run executor', {
-      errorMessage: err?.message || 'Unknown error',
-      errorStack: err?.stack || 'No stack trace available',
-    })
+    // logger.error('Run executor', 'Failed to run executor', {
+    //   errorMessage: err?.message || 'Unknown error',
+    //   errorStack: err?.stack || 'No stack trace available',
+    // })
+    return;
   }
 
   clearTimeout(shutdownTimeout)
