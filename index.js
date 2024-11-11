@@ -111,7 +111,7 @@ process.on('unhandledRejection', (reason, p) => {
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
-      logger.info('Executor result', results);
+      // logger.info('Executor result', results);
     }
     if (outputFilepath) {
       fs.writeFile(outputFilepath, JSON.stringify(results[0]), err => {
@@ -123,7 +123,10 @@ process.on('unhandledRejection', (reason, p) => {
   } catch (err) {
     await closeBrowser(browser)
     await chromiumBrowser.closeProxy()
-    return logger.error('Failed to run executor', err)
+    return logger.error('Failed to run executor', {
+      errorMessage: err?.message || 'Unknown error',
+      errorStack: err?.stack || 'No stack trace available',
+    })
   }
 
   clearTimeout(shutdownTimeout)
