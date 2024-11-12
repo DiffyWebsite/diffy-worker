@@ -100,7 +100,7 @@ process.on('unhandledRejection', (reason, p) => {
       logger.info('Timeout', result);
       process.exit(1); // Failure code returned.
     } catch (e) {
-      logger.error('Failed to shut down executor', e);
+      // logger.error('Failed to shut down executor', e);
       process.exit(1); // Failure code returned.
     }
   }, timeout);
