@@ -19,7 +19,7 @@
         "iltorb": "^2.4.4",
         "minimist": "^1.2.8",
         "proxy-chain": "^2.4.0",
-        "puppeteer": "^19.7.0",
+        "puppeteer": "^23.9.0",
         "request": "^2.88.2",
         "sharp": "^0.33.5",
         "striptags": "^3.2.0",
