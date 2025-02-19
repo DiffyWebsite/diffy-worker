@@ -108,7 +108,8 @@ process.on('unhandledRejection', (reason, p) => {
   try {
     const proxy = process.env.PROXY;
     if (message) {
-      logger.error('message', message);
+      const data = JSON.parse(message.Body);
+      logger.error('message', data.params.projectId, data.params);
     }
     browser = await chromiumBrowser.getBrowser(proxy)
     results = await run(message, browser, executor);
