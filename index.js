@@ -107,7 +107,9 @@ process.on('unhandledRejection', (reason, p) => {
 
   try {
     const proxy = process.env.PROXY;
-    logger.error('message', message);
+    if (message) {
+      logger.error('message', message);
+    }
     browser = await chromiumBrowser.getBrowser(proxy)
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
