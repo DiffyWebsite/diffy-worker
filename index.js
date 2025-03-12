@@ -11,7 +11,7 @@ const debug = !!process.env.DEBUG;
 
 const { performance } = require('perf_hooks')
 const { Executor } = require('./lib/executor')
-const { Logger } = require('./lib/logger')
+const logger = require('./lib/logger')
 const { ChromiumBrowser } = require('./lib/chromiumBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
 
@@ -23,8 +23,6 @@ const outputFilepath = argv['output-filepath'] !== undefined ? argv['output-file
 const isSqs = !jobFile && !jobFileContent;
 
 const sqsSender = new SqsSender(debug, local);
-
-const logger = new Logger(debug);
 
 let message;
 
@@ -86,6 +84,11 @@ process.on('unhandledRejection', (reason, p) => {
     }
   }
 
+  if (!message) {
+    logger.debug('No messages');
+    return;
+  }
+
   let browser = null
   let results = []
   let handlerTimeExecuteStart = performance.now();
@@ -97,10 +100,9 @@ process.on('unhandledRejection', (reason, p) => {
     try {
       const result = await executor.timeout(handlerTimeExecuteStart)
       executor.shutdown()
-      logger.info('Timeout', result);
+      logger.warning('Timeout', result);
       process.exit(1); // Failure code returned.
     } catch (e) {
-      // logger.error('Failed to shut down executor', e);
       process.exit(1); // Failure code returned.
     }
   }, timeout);
@@ -108,6 +110,14 @@ process.on('unhandledRejection', (reason, p) => {
   try {
     let proxy = null
     const data = JSON.parse(message.Body);
+
+    logger.defaultMeta.project_id = data?.project_id
+    logger.defaultMeta.snapshot_id = data?.job_id
+    logger.defaultMeta.job_id = data?.id
+    logger.defaultMeta.breakpoint = data?.params?.breakpoint
+    logger.defaultMeta.url = data?.params?.url
+
+    logger.info('Start process', { message_body: data })
 
     if (data.params.proxy) {
       proxy = process.env.PROXY;
@@ -129,10 +139,12 @@ process.on('unhandledRejection', (reason, p) => {
   } catch (err) {
     await closeBrowser(browser)
     await chromiumBrowser.closeProxy()
-    // logger.error('Run executor', 'Failed to run executor', {
-    //   errorMessage: err?.message || 'Unknown error',
-    //   errorStack: err?.stack || 'No stack trace available',
-    // })
+
+    logger.error('Failed to run executor', {
+      errorMessage: err?.message || 'Unknown error',
+      errorStack: err?.stack || 'No stack trace available',
+    })
+
     return;
   }
 

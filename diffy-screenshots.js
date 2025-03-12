@@ -1,10 +1,8 @@
 // Example to run
 // node diffy-screenshots.js --url=https://diffy.website
 const process = require("process");
-const debug = !!process.env.DEBUG;
 
-const { Logger } = require('./lib/logger')
-const logger = new Logger(debug);
+const logger = require('./lib/logger')
 
 const { Jobs } = require('./lib/jobs')
 const jobs = new Jobs(logger)
