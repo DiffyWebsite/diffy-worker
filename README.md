@@ -65,12 +65,14 @@ https://pptr.dev/supported-browsers
 To install specific version of Chromium
 https://www.chromium.org/getting-involved/download-chromium/
 
-Chromium 111 was installed from specific source
+Chromium 131 was installed from specific source
 ```shell
-add-apt-repository ppa:saiarcot895/chromium-dev
-apt update
-apt-get install chromium-browser
-chromium-browser --version
+# Install Chrome for Puppeteer
+RUN npx @puppeteer/browsers install chrome@131.0.6778.85 --base-url=https://storage.googleapis.com/chrome-for-testing-public
+# Dependencies for Chrome
+RUN apt-get install -y libgbm-dev
+# Link Chrome
+RUN ln -s /diffy-worker/chrome/linux-131.0.6778.85/chrome-linux64/chrome /usr/bin/chromium-browser
 ```
 
 Create a job in SQS. Once created edit it and clear "Access policy" section. 
@@ -87,7 +89,9 @@ fc-cache -f -v
 ```
 
 To check fonts
+```shell
 fc-match system-ui
+```
 
 ### Make changes to the container
 
