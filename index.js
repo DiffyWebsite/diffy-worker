@@ -100,7 +100,7 @@ process.on('unhandledRejection', (reason, p) => {
     try {
       const result = await executor.timeout(handlerTimeExecuteStart)
       executor.shutdown()
-      logger.warning('Timeout', result);
+      logger.warn('Timeout', result);
       process.exit(1); // Failure code returned.
     } catch (e) {
       process.exit(1); // Failure code returned.
