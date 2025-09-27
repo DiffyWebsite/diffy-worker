@@ -18,9 +18,13 @@ if (apiKey == '') {
   console.log('Add Diffy API key to .env file. DIFFY_API_KEY=XXX')
   return;
 }
-const projectId = process.env.DIFFY_PROJECT_ID || ''
+let projectId = process.env.DIFFY_PROJECT_ID || ''
+const argv = require('minimist')(process.argv.slice(2));
+if (argv.projectId !== undefined) {
+  projectId = argv.projectId;
+}
 if (projectId == '') {
-  console.log('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX')
+  console.log('Missing Diffy API project ID. Either add it to .env file (DIFFY_PROJECT_ID=XXX) or provide it as argument --projectId=XXX.')
   return;
 }
 const maxWorkers = parseInt(process.env.DIFFY_MAX_WORKERS || '5');
@@ -32,9 +36,6 @@ const diffyWebsiteUrl = 'https://app.diffy.website/#'
 // Staging URLs
 // const diffyUrl = 'https://stage.diffy.website/api'
 // const diffyWebsiteUrl = 'https://stage.diffy.website/#'
-
-const argv = require('minimist')(process.argv.slice(2));
-
 
 async function end (code = 1) {
   try {
