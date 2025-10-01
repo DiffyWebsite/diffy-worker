@@ -123,7 +123,8 @@ process.on('unhandledRejection', (reason, p) => {
       proxy = process.env.PROXY;
     }
 
-    browser = await chromiumBrowser.getBrowser(proxy)
+    const needIncrease = data?.params?.args?.need_increase;
+    browser = await chromiumBrowser.getBrowser(proxy, { needIncrease })
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
