@@ -135,7 +135,7 @@ process.on('unhandledRejection', (reason, p) => {
     const needIncrease = data?.params?.args?.need_increase;
     const handlerTimeout = resolveTimeoutWithNeedIncrease(needIncrease, timeout);
     scheduleShutdown(handlerTimeout);
-    browser = await chromiumBrowser.getBrowser(proxy, { needIncrease })
+    browser = await chromiumBrowser.getBrowser(proxy, { needIncrease, handlerTimeout })
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
