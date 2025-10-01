@@ -132,7 +132,7 @@ process.on('unhandledRejection', (reason, p) => {
       proxy = process.env.PROXY;
     }
 
-    const needIncrease = data?.params?.args?.need_increase ?? data?.params?.need_increase ?? data?.need_increase;
+    const needIncrease = data?.params?.need_increase;
     const handlerTimeout = resolveTimeoutWithNeedIncrease(needIncrease, timeout);
     scheduleShutdown(handlerTimeout);
     browser = await chromiumBrowser.getBrowser(proxy, { needIncrease, handlerTimeout })
