@@ -14,6 +14,7 @@ const { Executor } = require('./lib/executor')
 const logger = require('./lib/logger')
 const { ChromiumBrowser } = require('./lib/chromiumBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
+const { resolveTimeoutWithNeedIncrease } = require('./lib/timeoutHelper')
 
 const argv = require('minimist')(process.argv.slice(2));
 const local = argv.local ? argv.local : false;
@@ -95,17 +96,25 @@ process.on('unhandledRejection', (reason, p) => {
   const executor = new Executor(debug, local);
   const chromiumBrowser = new ChromiumBrowser(debug, local)
 
-  // Stop process after a timeout.
-  const shutdownTimeout = setTimeout(async () => {
-    try {
-      const result = await executor.timeout(handlerTimeExecuteStart)
-      executor.shutdown()
-      logger.warn('Timeout', result);
-      process.exit(1); // Failure code returned.
-    } catch (e) {
-      process.exit(1); // Failure code returned.
+  let shutdownTimeout = null;
+  const scheduleShutdown = (timeoutMs) => {
+    if (shutdownTimeout) {
+      clearTimeout(shutdownTimeout);
     }
-  }, timeout);
+
+    shutdownTimeout = setTimeout(async () => {
+      try {
+        const result = await executor.timeout(handlerTimeExecuteStart)
+        executor.shutdown()
+        logger.warn('Timeout', result);
+        process.exit(1); // Failure code returned.
+      } catch (e) {
+        process.exit(1); // Failure code returned.
+      }
+    }, timeoutMs);
+  };
+
+  scheduleShutdown(timeout);
 
   try {
     let proxy = null
@@ -124,6 +133,8 @@ process.on('unhandledRejection', (reason, p) => {
     }
 
     const needIncrease = data?.params?.args?.need_increase;
+    const handlerTimeout = resolveTimeoutWithNeedIncrease(needIncrease, timeout);
+    scheduleShutdown(handlerTimeout);
     browser = await chromiumBrowser.getBrowser(proxy, { needIncrease })
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
