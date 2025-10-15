@@ -138,7 +138,11 @@ process.on('unhandledRejection', (reason, p) => {
       proxy = process.env.PROXY;
     }
 
-    scheduleShutdown(120000);
+    const delaySec = Number(data?.params?.delay_before_screenshot || 0);
+    const extraBufferMs = Math.min(Math.max(delaySec, 0) * 3000 + 120000, 20 * 60 * 1000);
+    const baseHandler = 5 * 60 * 1000 + extraBufferMs;
+
+    scheduleShutdown(baseHandler);
     browser = await chromiumBrowser.getBrowser(proxy)
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.

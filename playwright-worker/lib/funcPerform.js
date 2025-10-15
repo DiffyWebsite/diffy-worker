@@ -434,6 +434,26 @@ module.exports = {
         });
       }
 
+      // Block known-noise third parties (analytics/ads) to reduce flakiness.
+      const defaultBlockedHosts = [
+        'www.google-analytics.com', 'analytics.google.com', 'ssl.google-analytics.com',
+        'www.googletagmanager.com', 'googletagmanager.com', 'www.googletagservices.com',
+        'connect.facebook.net', 'static.hotjar.com', 'script.hotjar.com', 'cdn.segment.com',
+        'api.segment.io', 'static.ads-twitter.com', 'bat.bing.com', 'cdn.fullstory.com',
+        'rs.fullstory.com', 'snap.licdn.com', 'cdn.heapanalytics.com', 'js.intercomcdn.com',
+        'widget.intercom.io', 'hs-analytics.net', 'hs-scripts.com', 'googlesyndication.com',
+        'doubleclick.net'
+      ];
+      await page.route('**/*', (route) => {
+        try {
+          const host = new URL(route.request().url()).host;
+          if (defaultBlockedHosts.some((h) => host.endsWith(h))) {
+            return route.abort();
+          }
+        } catch (_) {}
+        return route.continue();
+      });
+
       if (basicAuthRouteConfig) {
         await page.route('**', (route) => {
           const request = route.request();
