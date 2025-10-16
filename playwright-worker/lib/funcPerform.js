@@ -576,7 +576,9 @@ module.exports = {
         logger.warn('Failed to disable GIF animation', { error: e })
       }
 
-      await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 1000 })
+      if (!page.isClosed()) {
+        await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 1000 })
+      }
       logger.debug('page.goto done')
 
       await page.evaluate(() => document.fonts.ready.then(() => true))
@@ -656,8 +658,10 @@ module.exports = {
       const is_cut = await func.cutElements(page, jobItem)
       if (is_cut) {
         // We need decrease height after cut.
-        await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 100 })
-        await func.updatePageViewport(page, jobItem, maxPageHeight)
+        if (!page.isClosed()) {
+          await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 100 })
+          await func.updatePageViewport(page, jobItem, maxPageHeight)
+        }
       }
       logger.debug('cutElements done')
 
@@ -668,8 +672,10 @@ module.exports = {
       logger.debug('hideBanners done')
 
       // Recalculate page height after modifications.
-      await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 100 })
-      await func.updatePageViewport(page, jobItem, maxPageHeight)
+      if (!page.isClosed()) {
+        await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 100 })
+        await func.updatePageViewport(page, jobItem, maxPageHeight)
+      }
 
       await func.autoScroll(page, jobItem)
       logger.debug('double autoScroll done')
@@ -705,13 +711,16 @@ module.exports = {
       // - Set omitBackground: false to ensure opaque output and avoid
       //   compositing differences.
       // - Ensure the page finished layout after updates by forcing a sync reflow.
+      if (page.isClosed()) throw new Error('Page closed before capture')
       await page.evaluate(() => {
         // Force a reflow to settle layout before capture
         void document.body.offsetHeight;
       });
 
+      if (page.isClosed()) throw new Error('Page closed before capture')
       await page.waitForTimeout(150)
 
+      if (page.isClosed()) throw new Error('Page closed before capture')
       await page.screenshot({
         path: filename,
         fullPage: true,
