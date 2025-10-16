@@ -582,6 +582,8 @@ module.exports = {
       await page.evaluate(() => document.fonts.ready.then(() => true))
       await page.waitForFunction(() => document.readyState === 'complete');
 
+      await page.waitForTimeout(50)
+
       await func.humanLikeInteraction(page)
 
       // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
@@ -707,6 +709,9 @@ module.exports = {
         // Force a reflow to settle layout before capture
         void document.body.offsetHeight;
       });
+
+      await page.waitForTimeout(150)
+
       await page.screenshot({
         path: filename,
         fullPage: true,

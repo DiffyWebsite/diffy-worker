@@ -443,7 +443,8 @@ const buildHeaderConfig = (job) => {
   }
 
   if (!userAgentString.length) {
-    profile = BROWSER_PROFILES[randomIntegerBetween(0, BROWSER_PROFILES.length - 1)]
+    // Use a single, consistent profile for stable VRT runs.
+    profile = BROWSER_PROFILES[0]
     userAgentString = profile.userAgent
   } else {
     profile = {
@@ -474,10 +475,16 @@ const buildHeaderConfig = (job) => {
   }
 
   ensureHeader(headers, 'Accept', DEFAULT_ACCEPT_HEADER)
-  ensureHeader(headers, 'Accept-Language', buildAcceptLanguageHeader(profile.languages))
+  ensureHeader(headers, 'Accept-Language', buildAcceptLanguageHeader(['en-US','en']))
   ensureHeader(headers, 'Upgrade-Insecure-Requests', '1')
 
-  const clientHints = buildClientHintMetadata(userAgentString, profile)
+  // Build consistent Client Hints: fixed platform/versions derived from locked profile
+  const clientHints = buildClientHintMetadata(userAgentString, {
+    ...profile,
+    locale: 'en-US',
+    languages: ['en-US','en'],
+    timezoneId: 'UTC',
+  })
   const clientHintHeaders = buildClientHintHeaders(clientHints)
   Object.entries(clientHintHeaders)
     .filter(([, value]) => value !== undefined)
@@ -492,9 +499,9 @@ const buildHeaderConfig = (job) => {
     userAgent: userAgentString,
     extraHeaders: headers,
     clientHints,
-    locale: profile.locale || profile.languages?.[0] || 'en-US',
-    languages: profile.languages || DEFAULT_LANGUAGES,
-    timezoneId: profile.timezoneId || 'UTC',
+    locale: 'en-US',
+    languages: ['en-US','en'],
+    timezoneId: 'UTC',
   }
 }
 
