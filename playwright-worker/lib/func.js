@@ -14,6 +14,30 @@ const DEFAULT_LANGUAGES = ['en-US', 'en']
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const describeError = (err) => {
+  if (!err) {
+    return 'unknown error'
+  }
+  if (Object.hasOwn(err, 'message') && err.message) {
+    return err.message
+  }
+  return String(err)
+}
+
+const isTargetClosureError = (err) => {
+  if (!err) {
+    return false
+  }
+  const message = describeError(err)
+  return /Target closed|Session closed|Page closed|Browser has been closed|Protocol error/i.test(message)
+}
+
+const ensurePageOpen = (page, label = 'operation') => {
+  if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
+    throw new Error(`Target closed before ${label}`)
+  }
+}
+
 const randomIntegerBetween = (min, max) => {
   if (max <= min) {
     return min
@@ -190,15 +214,35 @@ const checkArgs = (obj, field, checkLength = false) => {
 }
 
 const updatePageViewport = async (page, job, maxPageHeight = null) => {
-  let scrollHeight = await page.evaluate(`(async () => {
-        return document.documentElement.scrollHeight;
-    })()`)
+  ensurePageOpen(page, 'updatePageViewport evaluate')
+
+  let scrollHeight
+  try {
+    scrollHeight = await page.evaluate(() => document.documentElement.scrollHeight)
+  } catch (err) {
+    if (isTargetClosureError(err)) {
+      throw new Error(`Target closed during updatePageViewport evaluate: ${describeError(err)}`)
+    }
+    throw err
+  }
 
   if (maxPageHeight && scrollHeight > maxPageHeight) {
     scrollHeight = maxPageHeight
   }
 
-  await page.setViewportSize({ width: Number.parseInt(job.breakpoint), height: Number.parseInt(scrollHeight) })
+  ensurePageOpen(page, 'updatePageViewport resize')
+  try {
+    await page.setViewportSize({
+      width: Number.parseInt(job.breakpoint, 10),
+      height: Number.parseInt(scrollHeight, 10)
+    })
+  } catch (err) {
+    if (isTargetClosureError(err)) {
+      throw new Error(`Target closed during updatePageViewport resize: ${describeError(err)}`)
+    }
+    throw err
+  }
+
   return scrollHeight
 }
 
