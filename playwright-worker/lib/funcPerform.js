@@ -277,287 +277,322 @@ async function disableGifAnimation(page) {
   });
 }
 
+// Safe helpers to avoid calling into a closed target.
+const ensureOpen = (page, label = 'operation') => {
+  if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
+    throw new Error(`Page closed before ${label}`)
+  }
+}
+
+const safeEval = async (page, fn, arg, label = 'evaluate') => {
+  ensureOpen(page, label)
+  return page.evaluate(fn, arg)
+}
+
+const safeWaitForFunction = async (page, predicate, options, label = 'waitForFunction') => {
+  ensureOpen(page, label)
+  return page.waitForFunction(predicate, options)
+}
+
+const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
+  ensureOpen(page, label)
+  return page.addStyleTag(opts)
+}
+
 module.exports = {
 
   perform: async (browser, job, jobItem) => {
-    let data = {};
-    let context;
-    let page;
-    let jsConsole = [];
-    const maxPageHeightIfError = 50000;
+    // Bounded retry in case target/session closes mid-pipeline.
+    const maxAttempts = 2
+    let attempt = 0
+    let lastErr
 
-    // try {
-    //   await checkUrl(jobItem.url, jobItem)
-    //   logger.info(jobItem.id + ':' + jobItem.breakpoint + ':' + jobItem.url,'check url done')
-    // } catch (e) {
-    //   return await saveError(job, jobItem, 'CheckURL ' + ((e && e, 'message')) ? e.message : e.toString())
-    // }
+    while (attempt < maxAttempts) {
+      attempt++
 
-    try {
-      const maxPageHeight = (Object.hasOwn(job, 'attempts') && job.attempts > 0) ? (maxPageHeightIfError / job.attempts) : maxPageHeightIfError
+      let data = {};
+      let context;
+      let page;
+      let jsConsole = [];
+      const maxPageHeightIfError = 50000;
 
-      const viewportWidth = parseInt(jobItem.breakpoint) || 800;
-      const baseViewport = { width: viewportWidth, height: 1000 };
-      const headerConfig = func.buildHeaderConfig(jobItem);
+      // try {
+      //   await checkUrl(jobItem.url, jobItem)
+      //   logger.info(jobItem.id + ':' + jobItem.breakpoint + ':' + jobItem.url,'check url done')
+      // } catch (e) {
+      //   return await saveError(job, jobItem, 'CheckURL ' + ((e && e, 'message')) ? e.message : e.toString())
+      // }
 
-      const contextOptions = {
-        viewport: baseViewport,
-        bypassCSP: true,
-        ignoreHTTPSErrors: true,
-        userAgent: headerConfig.userAgent,
-        deviceScaleFactor: (Object.hasOwn(jobItem.args, 'retina_images') && jobItem.args.retina_images) ? 2 : 1,
-        locale: headerConfig.locale,
-        timezoneId: headerConfig.timezoneId,
-        hasTouch: (headerConfig.clientHints?.maxTouchPoints ?? 0) > 1,
-      };
+      try {
+        const maxPageHeight = (Object.hasOwn(job, 'attempts') && job.attempts > 0) ? (maxPageHeightIfError / job.attempts) : maxPageHeightIfError
 
-      if (
-        Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
-        Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
-        Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password
-      ) {
-        contextOptions.httpCredentials = {
-          username: jobItem.basicAuth.user,
-          password: jobItem.basicAuth.password,
+        const viewportWidth = parseInt(jobItem.breakpoint) || 800;
+        const baseViewport = {width: viewportWidth, height: 1000};
+        const headerConfig = func.buildHeaderConfig(jobItem);
+
+        const contextOptions = {
+          viewport: baseViewport,
+          bypassCSP: true,
+          ignoreHTTPSErrors: true,
+          userAgent: headerConfig.userAgent,
+          deviceScaleFactor: (Object.hasOwn(jobItem.args, 'retina_images') && jobItem.args.retina_images) ? 2 : 1,
+          locale: headerConfig.locale,
+          timezoneId: headerConfig.timezoneId,
+          hasTouch: (headerConfig.clientHints?.maxTouchPoints ?? 0) > 1,
         };
-      }
 
-      context = await browser.newContext(contextOptions);
-      await func.applyHeadersToContext(context, headerConfig);
-      await func.applyStealth(context, headerConfig);
-      page = await context.newPage();
-
-      if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
-        await page.emulateMedia({ colorScheme: 'dark' });
-      }
-
-      logger.debug('browser.newContext', { jobItem })
-
-      await page.setDefaultNavigationTimeout(90000)
-      await page.setDefaultTimeout(30000)
-
-      logger.debug('setDefaultNavigationTimeout done')
-
-      page.on('console', msg => {
-        let consoleMes
-        try {
-          consoleMes = {
-            type: msg.type(),
-            text: msg.text(),
-            location: msg.location(),
-          }
-        } catch (e) {
-          consoleMes = {
-            type: e.type(),
-            text: e.text(),
-            location: e.location(),
-          }
+        if (
+            Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
+            Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
+            Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password
+        ) {
+          contextOptions.httpCredentials = {
+            username: jobItem.basicAuth.user,
+            password: jobItem.basicAuth.password,
+          };
         }
 
-        jsConsole.push(consoleMes)
-      })
+        context = await browser.newContext(contextOptions);
+        await func.applyHeadersToContext(context, headerConfig);
+        await func.applyStealth(context, headerConfig);
+        page = await context.newPage();
 
-      await context.clearCookies();
-      logger.debug('setHeaders prepared', { userAgent: headerConfig.userAgent, extraHeaders: headerConfig.extraHeaders || {} })
-
-      if (!Object.hasOwn(jobItem, 'url') || !Object.hasOwn(jobItem, 'breakpoint')) {
-        throw new Error('Cannot find url or breakpoint options')
-      }
-
-      let url = jobItem.url;
-
-      if (jobItem.url && jobItem.base_url) {
-        // Base URL can have GET parameters. We need to merge them with url.
-        let pageUrl = new URL(jobItem.url);
-        let pageUrlParameters = pageUrl.searchParams;
-        let pageUrlHash = pageUrl.hash;
-
-        let baseUrl = new URL(jobItem.base_url);
-        let baseUrlParameters = baseUrl.searchParams;
-
-        // We override base URL parameters with ones from the page.
-        pageUrlParameters.forEach((value, key) => {
-          baseUrlParameters.set(key, value);
-        });
-
-        url = jobItem.url.replace(/[\?#].*$/, '');
-
-        const parametersString = baseUrlParameters.toString();
-        if (parametersString) {
-          url += '?' + parametersString;
+        if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
+          await page.emulateMedia({colorScheme: 'dark'});
         }
 
-        if (pageUrlHash) {
-          url += pageUrlHash;
-        }
-      }
+        logger.debug('browser.newContext', {jobItem})
 
-      const callRailBlockEnabled = Object.hasOwn(jobItem, 'project_id') && jobItem.project_id === 21791;
-      let basicAuthRouteConfig = null;
-      if (
-        Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
-        Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
-        Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password &&
-        url.startsWith('http://')
-      ) {
-        basicAuthRouteConfig = {
-          header: `Basic ${Buffer.from(`${jobItem.basicAuth.user}:${jobItem.basicAuth.password}`).toString('base64')}`,
-          targetHost: (() => {
-            try {
-              return new URL(jobItem.base_url).host;
-            } catch (e) {
-              return null;
+        await page.setDefaultNavigationTimeout(90000)
+        await page.setDefaultTimeout(30000)
+
+        logger.debug('setDefaultNavigationTimeout done')
+
+        page.on('console', msg => {
+          let consoleMes
+          try {
+            consoleMes = {
+              type: msg.type(),
+              text: msg.text(),
+              location: msg.location(),
             }
-          })()
-        };
-
-        page.on('response', async (res) => {
-          const status = res.status();
-          const resUrl = res.url();
-
-          if (status === 401) {
-            const body = await res.text();
-            logger.debug('[401 Response]', resUrl, body.slice(0, 300));
+          } catch (e) {
+            consoleMes = {
+              type: e.type(),
+              text: e.text(),
+              location: e.location(),
+            }
           }
 
-          if (status >= 300 && status < 400) {
-            logger.debug('[REDIRECT]', status, '→', res.headers()['location']);
-          }
-        });
-      }
+          jsConsole.push(consoleMes)
+        })
 
-      if (callRailBlockEnabled) {
-        await page.route('**/*swap_session.json*', (route) => {
-          route.abort().catch((error) => {
-            logger.warn('Failed to abort CallRail request', { error, requestUrl: route.request().url() });
+        await context.clearCookies();
+        logger.debug('setHeaders prepared', {
+          userAgent: headerConfig.userAgent,
+          extraHeaders: headerConfig.extraHeaders || {}
+        })
+
+        if (!Object.hasOwn(jobItem, 'url') || !Object.hasOwn(jobItem, 'breakpoint')) {
+          throw new Error('Cannot find url or breakpoint options')
+        }
+
+        let url = jobItem.url;
+
+        if (jobItem.url && jobItem.base_url) {
+          // Base URL can have GET parameters. We need to merge them with url.
+          let pageUrl = new URL(jobItem.url);
+          let pageUrlParameters = pageUrl.searchParams;
+          let pageUrlHash = pageUrl.hash;
+
+          let baseUrl = new URL(jobItem.base_url);
+          let baseUrlParameters = baseUrl.searchParams;
+
+          // We override base URL parameters with ones from the page.
+          pageUrlParameters.forEach((value, key) => {
+            baseUrlParameters.set(key, value);
           });
-        });
-      }
 
-      // Block known-noise third parties (analytics/ads) to reduce flakiness.
-      const defaultBlockedHosts = [
-        'www.google-analytics.com', 'analytics.google.com', 'ssl.google-analytics.com',
-        'www.googletagmanager.com', 'googletagmanager.com', 'www.googletagservices.com',
-        'connect.facebook.net', 'static.hotjar.com', 'script.hotjar.com', 'cdn.segment.com',
-        'api.segment.io', 'static.ads-twitter.com', 'bat.bing.com', 'cdn.fullstory.com',
-        'rs.fullstory.com', 'snap.licdn.com', 'cdn.heapanalytics.com', 'js.intercomcdn.com',
-        'widget.intercom.io', 'hs-analytics.net', 'hs-scripts.com', 'googlesyndication.com',
-        'doubleclick.net'
-      ];
-      await page.route('**/*', (route) => {
-        try {
-          const host = new URL(route.request().url()).host;
-          if (defaultBlockedHosts.some((h) => host.endsWith(h))) {
-            return route.abort();
+          url = jobItem.url.replace(/[\?#].*$/, '');
+
+          const parametersString = baseUrlParameters.toString();
+          if (parametersString) {
+            url += '?' + parametersString;
           }
-        } catch (_) {}
-        return route.continue();
-      });
 
-      if (basicAuthRouteConfig) {
-        await page.route('**', (route) => {
-          const request = route.request();
-          const requestUrl = request.url();
+          if (pageUrlHash) {
+            url += pageUrlHash;
+          }
+        }
 
-          const headers = {
-            ...request.headers(),
-            Authorization: basicAuthRouteConfig.header,
+        const callRailBlockEnabled = Object.hasOwn(jobItem, 'project_id') && jobItem.project_id === 21791;
+        let basicAuthRouteConfig = null;
+        if (
+            Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
+            Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
+            Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password &&
+            url.startsWith('http://')
+        ) {
+          basicAuthRouteConfig = {
+            header: `Basic ${Buffer.from(`${jobItem.basicAuth.user}:${jobItem.basicAuth.password}`).toString('base64')}`,
+            targetHost: (() => {
+              try {
+                return new URL(jobItem.base_url).host;
+              } catch (e) {
+                return null;
+              }
+            })()
           };
 
-          let overriddenUrl = requestUrl;
-          const currentHost = (() => {
-            try {
-              return new URL(overriddenUrl).host;
-            } catch (e) {
-              return null;
+          page.on('response', async (res) => {
+            const status = res.status();
+            const resUrl = res.url();
+
+            if (status === 401) {
+              const body = await res.text();
+              logger.debug('[401 Response]', resUrl, body.slice(0, 300));
             }
-          })();
 
-          if (currentHost && basicAuthRouteConfig.targetHost && currentHost === basicAuthRouteConfig.targetHost) {
-            overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
-          }
-
-          route.continue({ headers, url: overriddenUrl }).catch((error) => {
-            logger.warn('Failed to continue basic auth request', { error, requestUrl });
+            if (status >= 300 && status < 400) {
+              logger.debug('[REDIRECT]', status, '→', res.headers()['location']);
+            }
           });
-        });
-      }
-
-      // Add new cookies.
-      let cookies = await func.addCookies(jobItem)
-      logger.debug('addCookies done')
-
-      const authCookies = await func.auth(page, jobItem).catch((err) => {
-        const message = (err && Object.hasOwn(err, 'message')) ? err.message : err;
-        data.auth_error = `${err?.name || 'AuthError'}: ${message}`;
-        return null;
-      })
-
-      logger.debug('auth done')
-
-      if (authCookies) {
-        logger.debug('authCookies', { authCookies })
-        cookies = cookies.concat(authCookies)
-      }
-
-      if (cookies?.length) {
-        await context.addCookies(cookies)
-      }
-
-      try {
-        const origin = new URL(url).origin
-        await context.grantPermissions(['geolocation', 'clipboard-read', 'clipboard-write', 'notifications', 'camera', 'microphone'], { origin })
-      } catch (error) {
-        logger.warn('Failed to grant permissions for origin', { error })
-      }
-
-      await func.simulatePreNavigation(page, url)
-
-      let response;
-
-      try {
-        await page.waitForTimeout(func.random(120, 380));
-        response = await page.goto(url, { waitUntil: 'networkidle' })
-
-        await handleIncapsula(page);
-        await func.handleCloudflareChallenge(page, { frameWaitMs: 8000, retryDelayMs: 2500 }).catch((error) => {
-          logger.warn('Cloudflare challenge handling failed', { error })
-        })
-        const unresolvedChallenge = await page.evaluate(() => {
-          const bodyText = document.body?.innerText || ''
-          return bodyText.includes('Please unblock challenges.cloudflare.com')
-        }).catch(() => false)
-        if (unresolvedChallenge) {
-          throw new Error('Cloudflare challenge unresolved: Please unblock challenges.cloudflare.com')
         }
-      } catch (err) {
-        logger.warn('page was not loaded by networkidle', { url })
+
+        if (callRailBlockEnabled) {
+          await page.route('**/*swap_session.json*', (route) => {
+            route.abort().catch((error) => {
+              logger.warn('Failed to abort CallRail request', {error, requestUrl: route.request().url()});
+            });
+          });
+        }
+
+        // Block known-noise third parties (analytics/ads) to reduce flakiness.
+        const defaultBlockedHosts = [
+          'www.google-analytics.com', 'analytics.google.com', 'ssl.google-analytics.com',
+          'www.googletagmanager.com', 'googletagmanager.com', 'www.googletagservices.com',
+          'connect.facebook.net', 'static.hotjar.com', 'script.hotjar.com', 'cdn.segment.com',
+          'api.segment.io', 'static.ads-twitter.com', 'bat.bing.com', 'cdn.fullstory.com',
+          'rs.fullstory.com', 'snap.licdn.com', 'cdn.heapanalytics.com', 'js.intercomcdn.com',
+          'widget.intercom.io', 'hs-analytics.net', 'hs-scripts.com', 'googlesyndication.com',
+          'doubleclick.net'
+        ];
+        await page.route('**/*', (route) => {
+          try {
+            const host = new URL(route.request().url()).host;
+            if (defaultBlockedHosts.some((h) => host.endsWith(h))) {
+              return route.abort();
+            }
+          } catch (_) {
+          }
+          return route.continue();
+        });
+
+        if (basicAuthRouteConfig) {
+          await page.route('**', (route) => {
+            const request = route.request();
+            const requestUrl = request.url();
+
+            const headers = {
+              ...request.headers(),
+              Authorization: basicAuthRouteConfig.header,
+            };
+
+            let overriddenUrl = requestUrl;
+            const currentHost = (() => {
+              try {
+                return new URL(overriddenUrl).host;
+              } catch (e) {
+                return null;
+              }
+            })();
+
+            if (currentHost && basicAuthRouteConfig.targetHost && currentHost === basicAuthRouteConfig.targetHost) {
+              overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
+            }
+
+            route.continue({headers, url: overriddenUrl}).catch((error) => {
+              logger.warn('Failed to continue basic auth request', {error, requestUrl});
+            });
+          });
+        }
+
+        // Add new cookies.
+        let cookies = await func.addCookies(jobItem)
+        logger.debug('addCookies done')
+
+        const authCookies = await func.auth(page, jobItem).catch((err) => {
+          const message = (err && Object.hasOwn(err, 'message')) ? err.message : err;
+          data.auth_error = `${err?.name || 'AuthError'}: ${message}`;
+          return null;
+        })
+
+        logger.debug('auth done')
+
+        if (authCookies) {
+          logger.debug('authCookies', {authCookies})
+          cookies = cookies.concat(authCookies)
+        }
+
+        if (cookies?.length) {
+          await context.addCookies(cookies)
+        }
 
         try {
-          response = await page.goto(url, { waitUntil: 'load' })
-          await page.waitForLoadState('domcontentloaded', { timeout: 120000 }).catch(() => {})
-          await func.handleCloudflareChallenge(page, { frameWaitMs: 8000, retryDelayMs: 2500 }).catch((error) => {
-            logger.warn('Cloudflare challenge handling failed (retry branch)', { error })
+          const origin = new URL(url).origin
+          await context.grantPermissions(['geolocation', 'clipboard-read', 'clipboard-write', 'notifications', 'camera', 'microphone'], {origin})
+        } catch (error) {
+          logger.warn('Failed to grant permissions for origin', {error})
+        }
+
+        await func.simulatePreNavigation(page, url)
+
+        let response;
+
+        try {
+          await page.waitForTimeout(func.random(120, 380));
+          response = await page.goto(url, {waitUntil: 'networkidle'})
+
+          await handleIncapsula(page);
+          await func.handleCloudflareChallenge(page, {frameWaitMs: 8000, retryDelayMs: 2500}).catch((error) => {
+            logger.warn('Cloudflare challenge handling failed', {error})
           })
           const unresolvedChallenge = await page.evaluate(() => {
             const bodyText = document.body?.innerText || ''
             return bodyText.includes('Please unblock challenges.cloudflare.com')
           }).catch(() => false)
           if (unresolvedChallenge) {
-            throw new Error('Cloudflare challenge unresolved after reload')
+            throw new Error('Cloudflare challenge unresolved: Please unblock challenges.cloudflare.com')
           }
         } catch (err) {
-          logger.error('page was not loaded by load or domcontentloaded', { error: err, url })
+          logger.warn('page was not loaded by networkidle', {url})
+
+          try {
+            response = await page.goto(url, {waitUntil: 'load'})
+            await page.waitForLoadState('domcontentloaded', {timeout: 120000}).catch(() => {
+            })
+            await func.handleCloudflareChallenge(page, {frameWaitMs: 8000, retryDelayMs: 2500}).catch((error) => {
+              logger.warn('Cloudflare challenge handling failed (retry branch)', {error})
+            })
+            const unresolvedChallenge = await page.evaluate(() => {
+              const bodyText = document.body?.innerText || ''
+              return bodyText.includes('Please unblock challenges.cloudflare.com')
+            }).catch(() => false)
+            if (unresolvedChallenge) {
+              throw new Error('Cloudflare challenge unresolved after reload')
+            }
+          } catch (err) {
+            logger.error('page was not loaded by load or domcontentloaded', {error: err, url})
+          }
         }
-      }
 
-      logger.debug('page loaded done')
+        logger.debug('page loaded done')
 
-      // Disable animation / transition (exclude diff from animation)
-      logger.debug('disable css animation')
+        // Disable animation / transition (exclude diff from animation)
+        logger.debug('disable css animation')
 
-      await page.addStyleTag({
-        content: `
+        await safeAddStyleTag(page, {
+          content: `
             *, *::after, *::before {
               transition-delay: 0s !important;
               transition-duration: 0s !important;
@@ -568,319 +603,336 @@ module.exports = {
               color-adjust: exact !important;
             }
           `
-      }).catch((e) => logger.warn('Failed to add style tag to disable animation', { error: e }))
+        }).catch((e) => logger.warn('Failed to add style tag to disable animation', {error: e}))
 
-      try {
-        await disableGifAnimation(page)
-      } catch (e) {
-        logger.warn('Failed to disable GIF animation', { error: e })
-      }
-
-      if (!page.isClosed()) {
-        await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 1000 })
-      }
-      logger.debug('page.goto done')
-
-      await page.evaluate(() => document.fonts.ready.then(() => true))
-      await page.waitForFunction(() => document.readyState === 'complete');
-
-      await page.waitForTimeout(50)
-
-      await func.humanLikeInteraction(page)
-
-      // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
-      await page.evaluate(() => {
         try {
-          window.dispatchEvent(new Event('touchstart'));
-          window.document.dispatchEvent(new Event('touchstart'));
-        } catch (e) {}
-      });
+          ensureOpen(page, 'disableGifAnimation');
+          await disableGifAnimation(page)
+        } catch (e) {
+          logger.warn('Failed to disable GIF animation', {error: e})
+        }
 
-      await func.addCssCode(page, jobItem)
-      logger.debug('addCssCode done')
+        if (!page.isClosed()) {
+          await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 1000})
+        }
+        logger.debug('page.goto done')
 
-      // #see https://github.com/ygerasimov/diffy-pm/issues/339
-      if (Object.hasOwn(jobItem, 'project_id') && jobItem.project_id === 20882) {
-        await func.cutElements(page, jobItem)
-      }
+        await safeEval(page, () => document.fonts.ready.then(() => true), undefined, 'fonts.ready')
+        await safeWaitForFunction(page, () => document.readyState === 'complete', undefined, 'readyState complete');
 
-      await func.autoScroll(page, jobItem)
-      logger.debug('autoScroll done')
+        ensureOpen(page, 'post-fonts wait')
+        await page.waitForTimeout(50)
 
-      if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
+        await func.humanLikeInteraction(page)
+
+        // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
+        await safeEval(page, () => {
+          try {
+            window.dispatchEvent(new Event('touchstart'));
+            window.document.dispatchEvent(new Event('touchstart'));
+          } catch (e) {
+          }
+        }, undefined, 'wp-rocket-fix');
+
+        await func.addCssCode(page, jobItem)
+        logger.debug('addCssCode done')
+
+        // #see https://github.com/ygerasimov/diffy-pm/issues/339
+        if (Object.hasOwn(jobItem, 'project_id') && jobItem.project_id === 20882) {
+          await func.cutElements(page, jobItem)
+        }
+
+        await func.autoScroll(page, jobItem)
+        logger.debug('autoScroll done')
+
+        if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
           await (async () => {
-              await eval(jobItem.args.stabilization_code);
+            await eval(jobItem.args.stabilization_code);
           })();
-      }
+        }
 
-      let page_height = await func.updatePageViewport(page, jobItem, maxPageHeight)
-      logger.debug('updatePageViewport done', { page_height })
+        let page_height = await func.updatePageViewport(page, jobItem, maxPageHeight)
+        logger.debug('updatePageViewport done', {page_height})
 
-      if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
-        await page.evaluate(async () => {
+        if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
+          await page.evaluate(async () => {
 
-          const stabilizeHeight = async (elementsHeights, level) => {
-            for (const element of elementsHeights) {
-              if (document.body.contains(element.node)) {
-                if (
-                    element.height !== element.node.offsetHeight &&
-                    element.viewportRatio >= 0.40
-                ) {
-                  element.node.style.height = element.height + 'px'
-                  element.node.style.maxHeight = element.height + 'px'
-                  element.node.style.minHeight = element.height + 'px'
+            const stabilizeHeight = async (elementsHeights, level) => {
+              for (const element of elementsHeights) {
+                if (document.body.contains(element.node)) {
+                  if (
+                      element.height !== element.node.offsetHeight &&
+                      element.viewportRatio >= 0.40
+                  ) {
+                    element.node.style.height = element.height + 'px'
+                    element.node.style.maxHeight = element.height + 'px'
+                    element.node.style.minHeight = element.height + 'px'
 
-                  if (element.node.scrollHeight === element.node.offsetHeight) {
-                    continue
+                    if (element.node.scrollHeight === element.node.offsetHeight) {
+                      continue
+                    }
                   }
-                }
 
-                if (element.childNodes.length) {
-                  await stabilizeHeight(element.childNodes, level + 1)
+                  if (element.childNodes.length) {
+                    await stabilizeHeight(element.childNodes, level + 1)
+                  }
                 }
               }
             }
+
+            await stabilizeHeight(window.diffyElementsHeights ?? [], 1);
+          })
+
+          // hide google maps
+          await func.hideBanners(page, {args: {elements: ['iframe[src*="google.com/maps"]']}})
+        }
+
+        await func.delayBeforeScreenshot(page, jobItem)
+
+        await func.addJsCode(page, jobItem)
+        logger.debug('addJsCode done')
+
+        logger.debug('delayBeforeScreenshot done')
+        ensureOpen(page, 'cutElements')
+        const is_cut = await func.cutElements(page, jobItem)
+        if (is_cut) {
+          // We need decrease height after cut.
+          if (!page.isClosed()) {
+            await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 100})
+            await func.updatePageViewport(page, jobItem, maxPageHeight)
           }
+        }
+        logger.debug('cutElements done')
 
-          await stabilizeHeight(window.diffyElementsHeights ?? [], 1);
-        })
+        await func.addFixtures(page, jobItem)
+        logger.debug('addFixtures done')
 
-        // hide google maps
-        await func.hideBanners(page, { args: { elements: ['iframe[src*="google.com/maps"]'] } })
-      }
+        await func.hideBanners(page, jobItem)
+        logger.debug('hideBanners done')
 
-      await func.delayBeforeScreenshot(page, jobItem)
-
-      await func.addJsCode(page, jobItem)
-      logger.debug('addJsCode done')
-
-      logger.debug('delayBeforeScreenshot done')
-      const is_cut = await func.cutElements(page, jobItem)
-      if (is_cut) {
-        // We need decrease height after cut.
+        // Recalculate page height after modifications.
         if (!page.isClosed()) {
-          await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 100 })
+          await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 100})
           await func.updatePageViewport(page, jobItem, maxPageHeight)
         }
-      }
-      logger.debug('cutElements done')
 
-      await func.addFixtures(page, jobItem)
-      logger.debug('addFixtures done')
+        await func.autoScroll(page, jobItem)
+        logger.debug('double autoScroll done')
+        const pageHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
 
-      await func.hideBanners(page, jobItem)
-      logger.debug('hideBanners done')
+        data.pageArea = pageHeight * jobItem.breakpoint
 
-      // Recalculate page height after modifications.
-      if (!page.isClosed()) {
-        await page.setViewportSize({ width: parseInt(jobItem.breakpoint), height: 100 })
-        await func.updatePageViewport(page, jobItem, maxPageHeight)
-      }
+        logger.debug('updatePageViewport done')
 
-      await func.autoScroll(page, jobItem)
-      logger.debug('double autoScroll done')
-      const pageHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
+        const is_crop = await func.cropElement(page, jobItem)
 
-      data.pageArea = pageHeight * jobItem.breakpoint
+        logger.debug('cropElement done')
 
-      logger.debug('updatePageViewport done')
+        const filenameKey = Math.floor(Date.now() / 1000) + '-' + (func.random(0, 999999999)).toString()
+        let filename = '/tmp/screenshot-' + filenameKey + '.png'
 
-      const is_crop = await func.cropElement(page, jobItem)
+        const htmlFilename = '/tmp/html-' + filenameKey + '.html'
 
-      logger.debug('cropElement done')
-
-      const filenameKey = Math.floor(Date.now() / 1000) + '-' + (func.random(0, 999999999)).toString()
-      let filename = '/tmp/screenshot-' + filenameKey + '.png'
-
-      const htmlFilename = '/tmp/html-' + filenameKey + '.html'
-
-      let mhtmlFilename = '';
-      if (Object.hasOwn(jobItem, 'mhtml') && jobItem.mhtml) {
-        mhtmlFilename = '/tmp/mhtml-' + filenameKey + '.mhtml'
-      }
-
-      const jsConsoleFilename = '/tmp/jsConsole-' + filenameKey + '.json'
-      let thumbnailFilepath = filename.replace('.png', '-thumbnail.png')
-
-      logger.debug('start screenshot')
-
-      // Take deterministic full-page screenshot of the entire scrollable height
-      // without introducing extra transparent padding.
-      // Notes:
-      // - Use fullPage: true to stitch the entire document height.
-      // - Set omitBackground: false to ensure opaque output and avoid
-      //   compositing differences.
-      // - Ensure the page finished layout after updates by forcing a sync reflow.
-      if (page.isClosed()) throw new Error('Page closed before capture')
-      await page.evaluate(() => {
-        // Force a reflow to settle layout before capture
-        void document.body.offsetHeight;
-      });
-
-      if (page.isClosed()) throw new Error('Page closed before capture')
-      await page.waitForTimeout(150)
-
-      if (page.isClosed()) throw new Error('Page closed before capture')
-      await page.screenshot({
-        path: filename,
-        fullPage: true,
-        omitBackground: false
-      })
-
-      logger.debug('screenshot done')
-      const pageHtml = await func.getPageHtml(page)
-      logger.debug('pageHtml done')
-
-      let pageMhtml = ''
-      if (mhtmlFilename) {
-        pageMhtml = await func.getPageMhtml(page)
-        logger.debug('pageMhtml done', { jobItem })
-      }
-
-      if (is_crop) {
-        await thumbnail.crop(filename, is_crop)
-        data.pageArea = is_crop.height * is_crop.width
-      }
-
-      await page.close()
-      logger.debug('page close done')
-      page = null
-
-      if (context) {
-        await context.close();
-        logger.debug('context close done');
-        context = null;
-      }
-
-      // check webp format
-      const screenshotSize = await func.getImageSize(filename)
-      let webpWasUsed = false
-
-      if (screenshotSize.height < 16000 && screenshotSize.width < 16000) {
-        const filenameWebp = filename.replace('.png', '.webp')
-
-        await thumbnail.webp(filename, filenameWebp)
-
-        filename = filenameWebp
-        thumbnailFilepath = thumbnailFilepath.replace('.png', '.webp')
-
-        webpWasUsed = true
-      }
-
-      logger.debug('screenshot created')
-
-      if (jobItem.local) {
-        const fs = require('node:fs');
-        try {
-          fs.writeFileSync(htmlFilename, pageHtml);
-        } catch (err) {
-          logger.error('Failed to write file', { error: err });
+        let mhtmlFilename = '';
+        if (Object.hasOwn(jobItem, 'mhtml') && jobItem.mhtml) {
+          mhtmlFilename = '/tmp/mhtml-' + filenameKey + '.mhtml'
         }
 
+        const jsConsoleFilename = '/tmp/jsConsole-' + filenameKey + '.json'
+        let thumbnailFilepath = filename.replace('.png', '-thumbnail.png')
+
+        logger.debug('start screenshot')
+
+        // Take deterministic full-page screenshot of the entire scrollable height
+        // without introducing extra transparent padding.
+        // Notes:
+        // - Use fullPage: true to stitch the entire document height.
+        // - Set omitBackground: false to ensure opaque output and avoid
+        //   compositing differences.
+        // - Ensure the page finished layout after updates by forcing a sync reflow.
+        if (page.isClosed()) throw new Error('Page closed before capture')
+        ensureOpen(page, 'pre-capture reflow')
+        await page.evaluate(() => {
+          // Force a reflow to settle layout before capture
+          void document.body.offsetHeight;
+        });
+
+        if (page.isClosed()) throw new Error('Page closed before capture')
+        await page.waitForTimeout(150)
+
+        if (page.isClosed()) throw new Error('Page closed before capture')
+        await page.screenshot({
+          path: filename,
+          fullPage: true,
+          omitBackground: false
+        })
+
+        logger.debug('screenshot done')
+        const pageHtml = await func.getPageHtml(page)
+        logger.debug('pageHtml done')
+
+        let pageMhtml = ''
         if (mhtmlFilename) {
+          pageMhtml = await func.getPageMhtml(page)
+          logger.debug('pageMhtml done', {jobItem})
+        }
+
+        if (is_crop) {
+          await thumbnail.crop(filename, is_crop)
+          data.pageArea = is_crop.height * is_crop.width
+        }
+
+        if (page && !page.isClosed()) {
+          await page.close()
+        }
+        logger.debug('page close done')
+        page = null
+
+        if (context) {
+          await context.close();
+          logger.debug('context close done');
+          context = null;
+        }
+
+        // check webp format
+        const screenshotSize = await func.getImageSize(filename)
+        let webpWasUsed = false
+
+        if (screenshotSize.height < 16000 && screenshotSize.width < 16000) {
+          const filenameWebp = filename.replace('.png', '.webp')
+
+          await thumbnail.webp(filename, filenameWebp)
+
+          filename = filenameWebp
+          thumbnailFilepath = thumbnailFilepath.replace('.png', '.webp')
+
+          webpWasUsed = true
+        }
+
+        logger.debug('screenshot created')
+
+        if (jobItem.local) {
+          const fs = require('node:fs');
           try {
-            fs.writeFileSync(mhtmlFilename, pageMhtml);
+            fs.writeFileSync(htmlFilename, pageHtml);
           } catch (err) {
-            logger.error('Failed to write MHTML file', { error: err });
+            logger.error('Failed to write file', {error: err});
+          }
+
+          if (mhtmlFilename) {
+            try {
+              fs.writeFileSync(mhtmlFilename, pageMhtml);
+            } catch (err) {
+              logger.error('Failed to write MHTML file', {error: err});
+            }
+          }
+
+          try {
+            fs.writeFileSync(jsConsoleFilename, JSON.stringify(jsConsole));
+          } catch (err) {
+            logger.error('Failed to write file', {error: err});
+          }
+
+          return {
+            screenshot: filename,
+            html: htmlFilename,
+            mhtml: mhtmlFilename,
+            jsConsole: jsConsoleFilename
           }
         }
 
-        try {
-          fs.writeFileSync(jsConsoleFilename, JSON.stringify(jsConsole));
-        } catch (err) {
-          logger.error('Failed to write file', { error: err });
-        }
-
-        return {
-          screenshot: filename,
-          html: htmlFilename,
-          mhtml: mhtmlFilename,
-          jsConsole: jsConsoleFilename
-        }
-      }
-
-      const s3Url = await uploadS3.upload(filename).catch((err) => {
-        logger.error('Failed to upload file to S3', { error: err });
-        throw new Error('Can\'t upload screenshot: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
-      })
-
-      logger.debug('uploadS3 done')
-
-      await thumbnail.generateImageThumbnail(filename, thumbnailFilepath).catch((err) => {
-        throw new Error('Can\'t generate thumbnail: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
-      })
-
-      logger.debug('generateImageThumbnail done')
-
-      const s3UrlThumbnail = await uploadS3.upload(thumbnailFilepath).catch((err) => {
-        throw new Error('Can\'t upload thumbnail: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
-      })
-
-      logger.debug('uploadS3Thumbnail done')
-
-      const s3HtmlUrl = await uploadS3.uploadFileString(htmlFilename, pageHtml).catch((err) => {
-        throw new Error('Can\'t upload html file: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
-      })
-
-      logger.debug('uploadHtmlFileString done')
-
-      let s3MhtmlUrl = ''
-
-      if (mhtmlFilename) {
-        s3MhtmlUrl = await uploadS3.uploadFileString(mhtmlFilename, pageMhtml).catch((err) => {
-          throw new Error('Can\'t upload mhtml file: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
+        const s3Url = await uploadS3.upload(filename).catch((err) => {
+          logger.error('Failed to upload file to S3', {error: err});
+          throw new Error('Can\'t upload screenshot: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
         })
 
-        logger.debug('uploadMhtmlFileString done', { job_item: jobItem })
-      }
+        logger.debug('uploadS3 done')
 
-      const s3JsConsoleUrl = await uploadS3.uploadFileString(jsConsoleFilename, JSON.stringify(jsConsole)).catch((err) => {
-        throw new Error('Can\'t upload jsConsole file: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
-      })
+        await thumbnail.generateImageThumbnail(filename, thumbnailFilepath).catch((err) => {
+          throw new Error('Can\'t generate thumbnail: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
+        })
 
-      logger.debug('uploadJsConsoleFileString done')
+        logger.debug('generateImageThumbnail done')
 
-      // Not need to remove "htmlFilename/mhtmlFilename" because we use stream and not creating real file.
-      // Async remove files.
-      await func.removeFile(filename)
-      await func.removeFile(thumbnailFilepath)
+        const s3UrlThumbnail = await uploadS3.upload(thumbnailFilepath).catch((err) => {
+          throw new Error('Can\'t upload thumbnail: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
+        })
 
-      if (webpWasUsed) {
-        await func.removeFile(filename.replace('.webp', '.png'))
-      }
+        logger.debug('uploadS3Thumbnail done')
 
-      return sendResult(job, jobItem, {
-        'full': s3Url,
-        'thumbnail': s3UrlThumbnail,
-        'html': s3HtmlUrl,
-        'mhtml': s3MhtmlUrl,
-        'jsConsole': s3JsConsoleUrl,
-        'data': data,
-        'log_data': '',
-        'status': response ? response.status() : null,
-      })
-    } catch (err) {
-      logger.error('perform error:', { error: err })
+        const s3HtmlUrl = await uploadS3.uploadFileString(htmlFilename, pageHtml).catch((err) => {
+          throw new Error('Can\'t upload html file: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
+        })
 
-      if (page) {
-        try {
-          await page.close()
-        } catch (e) {
-          logger.error('Failed to close page', { error: e })
+        logger.debug('uploadHtmlFileString done')
+
+        let s3MhtmlUrl = ''
+
+        if (mhtmlFilename) {
+          s3MhtmlUrl = await uploadS3.uploadFileString(mhtmlFilename, pageMhtml).catch((err) => {
+            throw new Error('Can\'t upload mhtml file: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
+          })
+
+          logger.debug('uploadMhtmlFileString done', {job_item: jobItem})
         }
-        page = null
-      }
 
-      if (context) {
-        try {
-          await context.close()
-        } catch (e) {
-          logger.error('Failed to close context', { error: e })
+        const s3JsConsoleUrl = await uploadS3.uploadFileString(jsConsoleFilename, JSON.stringify(jsConsole)).catch((err) => {
+          throw new Error('Can\'t upload jsConsole file: ' + err.name + ': ' + (err && Object.hasOwn(err, 'message')) ? err.message : err)
+        })
+
+        logger.debug('uploadJsConsoleFileString done')
+
+        // Not need to remove "htmlFilename/mhtmlFilename" because we use stream and not creating real file.
+        // Async remove files.
+        await func.removeFile(filename)
+        await func.removeFile(thumbnailFilepath)
+
+        if (webpWasUsed) {
+          await func.removeFile(filename.replace('.webp', '.png'))
         }
-        context = null
-      }
 
-      return sendError(job, (err && Object.hasOwn(err, 'message')) ? err.message : err.toString(), jobItem)
+        return sendResult(job, jobItem, {
+          'full': s3Url,
+          'thumbnail': s3UrlThumbnail,
+          'html': s3HtmlUrl,
+          'mhtml': s3MhtmlUrl,
+          'jsConsole': s3JsConsoleUrl,
+          'data': data,
+          'log_data': '',
+          'status': response ? response.status() : null,
+        })
+      } catch (err) {
+        logger.error('perform error:', {error: err})
+
+        if (page) {
+          try {
+            await page.close()
+          } catch (e) {
+            logger.error('Failed to close page', {error: e})
+          }
+          page = null
+        }
+
+        if (context) {
+          try {
+            await context.close()
+          } catch (e) {
+            logger.error('Failed to close context', {error: e})
+          }
+          context = null
+        }
+
+        // Retry once for transient target/session closed errors
+        const msg = (err && Object.hasOwn(err, 'message')) ? err.message : err.toString()
+        lastErr = msg
+        const transient = /Target closed|Session closed|Protocol error/.test(msg)
+        if (attempt < maxAttempts && transient) {
+          logger.warn('Retrying after transient closure', {attempt, msg})
+          continue
+        }
+        return sendError(job, msg, jobItem)
+      }
+      return sendError(job, lastErr || 'Unknown error', jobItem)
     }
   },
 
