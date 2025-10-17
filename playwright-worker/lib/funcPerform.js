@@ -8,6 +8,10 @@ const sharp = require('sharp')
 const MAX_TILE_OUTPUT_PX = 16000
 const MIN_TILE_CSS_HEIGHT = 1200
 const TILE_FALLBACK_BUFFER_MS = 50
+const CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT = 16384
+const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
+const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
+const IMAGE_STABILITY_TIMEOUT_MS = 5000
 
 const sendResult = (job, jobItem, data) => {
   job.status = true
@@ -304,6 +308,179 @@ const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
   return page.addStyleTag(opts)
 }
 
+const waitForVisualStability = async (page, {
+  totalTimeoutMs = LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS,
+  quietWindowMs = LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS,
+} = {}) => {
+  ensureOpen(page, 'visual-stability start')
+
+  let fontsSettled = false
+  try {
+    await safeEval(page, () => {
+      if (!document.fonts || typeof document.fonts.ready?.then !== 'function') {
+        return true
+      }
+      return document.fonts.ready.then(() => true)
+    }, undefined, 'fonts.ready wait')
+    fontsSettled = true
+  } catch (error) {
+    logger.warn('Font readiness wait failed', { error: error?.message || String(error) })
+  }
+
+  let imagesSettled = false
+  try {
+    await safeWaitForFunction(
+      page,
+      () => Array.from(document.images || []).every((img) => {
+        if (!img) return true
+        if (!img.complete) return false
+        if (typeof img.naturalWidth === 'number') {
+          return img.naturalWidth > 0
+        }
+        const rect = img.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      }),
+      { timeout: IMAGE_STABILITY_TIMEOUT_MS },
+      'images.complete wait'
+    )
+    imagesSettled = true
+  } catch (error) {
+    logger.warn('Image load stabilization timed out', {
+      timeoutMs: IMAGE_STABILITY_TIMEOUT_MS,
+      error: error?.message || String(error),
+    })
+  }
+
+  const quietMs = Math.max(quietWindowMs, 100)
+  const endTime = Date.now() + totalTimeoutMs
+  let layoutSettled = false
+
+  try {
+    const initStatus = await safeEval(page, ({ quietWindow }) => {
+      const monitor = window.__diffyLayoutShiftMonitor || {
+        lastShiftTs: performance.now(),
+        quietWindow,
+        unsupported: typeof PerformanceObserver !== 'function',
+      }
+
+      monitor.quietWindow = quietWindow
+      if (monitor.unsupported) {
+        window.__diffyLayoutShiftMonitor = monitor
+        return { unsupported: true }
+      }
+
+      if (!monitor.observer && typeof PerformanceObserver === 'function') {
+        try {
+          monitor.observer = new PerformanceObserver((list) => {
+            const entries = list.getEntries()
+            if (!entries?.length) {
+              return
+            }
+
+            const now = performance.now()
+            for (const entry of entries) {
+              if (entry?.hadRecentInput) continue
+              monitor.lastShiftTs = now
+              break
+            }
+          })
+          monitor.observer.observe({ type: 'layout-shift', buffered: true })
+        } catch (observerError) {
+          monitor.error = observerError?.message || String(observerError)
+        }
+      }
+
+      const buffered = performance.getEntriesByType?.('layout-shift') || []
+      if (buffered?.length) {
+        const lastBuffered = buffered
+          .filter((entry) => entry && !entry.hadRecentInput)
+          .map((entry) => entry.startTime)
+        if (lastBuffered.length) {
+          monitor.lastShiftTs = Math.max(monitor.lastShiftTs, ...lastBuffered, performance.now())
+        }
+      } else {
+        monitor.lastShiftTs = performance.now()
+      }
+
+      window.__diffyLayoutShiftMonitor = monitor
+      return {
+        unsupported: false,
+        error: monitor.error || null,
+      }
+    }, { quietWindow: quietMs }, 'init layout shift monitor')
+
+    if (initStatus?.unsupported) {
+      layoutSettled = true
+    } else if (initStatus?.error) {
+      logger.warn('Layout shift observer unavailable', { error: initStatus.error })
+      layoutSettled = true
+    } else {
+      while (Date.now() < endTime) {
+        const state = await safeEval(page, ({ quietWindow }) => {
+          const monitor = window.__diffyLayoutShiftMonitor
+          if (!monitor || monitor.unsupported) {
+            return { settled: true, unsupported: true }
+          }
+          if (monitor.error) {
+            return { settled: true, error: monitor.error }
+          }
+
+          const now = performance.now()
+          const lastShiftTs = typeof monitor.lastShiftTs === 'number' ? monitor.lastShiftTs : now
+          const delta = now - lastShiftTs
+          return {
+            settled: delta >= quietWindow,
+            delta,
+          }
+        }, { quietWindow: quietMs }, 'check layout stability')
+
+        if (state?.unsupported) {
+          layoutSettled = true
+          break
+        }
+
+        if (state?.error) {
+          logger.warn('Layout stabilization observer error', { error: state.error })
+          layoutSettled = true
+          break
+        }
+
+        if (state?.settled) {
+          layoutSettled = true
+          break
+        }
+
+        await page.waitForTimeout(Math.min(quietMs, 200))
+      }
+    }
+  } catch (error) {
+    logger.warn('Layout stabilization check failed', { error: error?.message || String(error) })
+  }
+
+  if (!layoutSettled) {
+    logger.warn('Layout stabilization timed out', {
+      quietWindowMs: quietMs,
+      totalTimeoutMs,
+    })
+  }
+
+  try {
+    await safeEval(page, () => {
+      const monitor = window.__diffyLayoutShiftMonitor
+      if (monitor?.observer && typeof monitor.observer.disconnect === 'function') {
+        monitor.observer.disconnect()
+      }
+    }, undefined, 'cleanup layout shift monitor')
+  } catch (_) {
+  }
+
+  return {
+    fontsSettled,
+    imagesSettled,
+    layoutSettled,
+  }
+}
+
 const captureLargePageScreenshot = async (page, targetPath) => {
   ensureOpen(page, 'large-screenshot preparation')
 
@@ -338,6 +515,14 @@ const captureLargePageScreenshot = async (page, targetPath) => {
   let outputHeightPx = 0
   const composites = []
 
+  logger.info('Assembling stitched screenshot fallback.', {
+    cssHeight: metrics.height,
+    cssWidth: metrics.width,
+    devicePixelRatio: metrics.devicePixelRatio,
+    tileCssHeight: maxTileCssHeight,
+    tileCssWidth: targetClipWidthCss,
+  })
+
   while (remainingCssHeight > 0) {
     let currentMetrics = metrics
     if (offsetCssY > 0) {
@@ -361,7 +546,7 @@ const captureLargePageScreenshot = async (page, targetPath) => {
     const clipWidthCss = Math.max(1, Math.min(targetClipWidthCss, currentWidthCss))
 
     if (clipHeightCss <= 0 || clipWidthCss <= 0) {
-      logger.warn('Stopping tiled screenshot capture due to shrinking page bounds.', {
+      logger.warn('Page resized while capturing; stopping stitched screenshot at new bounds.', {
         offsetCssY,
         remainingCssHeight,
         currentWidthCss,
@@ -735,11 +920,20 @@ module.exports = {
         }
         logger.debug('page.goto done')
 
-        await safeEval(page, () => document.fonts.ready.then(() => true), undefined, 'fonts.ready')
         await safeWaitForFunction(page, () => document.readyState === 'complete', undefined, 'readyState complete');
 
-        ensureOpen(page, 'post-fonts wait')
-        await page.waitForTimeout(50)
+        const stabilizationTimeoutOverride = Number.parseInt(jobItem?.args?.stabilization_timeout_ms ?? jobItem?.args?.stabilization_timeout, 10)
+        const stabilizationQuietWindowOverride = Number.parseInt(jobItem?.args?.stabilization_quiet_window_ms ?? jobItem?.args?.stabilization_quiet_window, 10)
+        const stabilizationOptions = {}
+        if (Number.isFinite(stabilizationTimeoutOverride) && stabilizationTimeoutOverride > 0) {
+          stabilizationOptions.totalTimeoutMs = stabilizationTimeoutOverride
+        }
+        if (Number.isFinite(stabilizationQuietWindowOverride) && stabilizationQuietWindowOverride > 0) {
+          stabilizationOptions.quietWindowMs = stabilizationQuietWindowOverride
+        }
+
+        const stabilitySummary = await waitForVisualStability(page, stabilizationOptions)
+        logger.debug('visual stabilization complete', stabilitySummary)
 
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
         await safeEval(page, () => {
@@ -885,13 +1079,22 @@ module.exports = {
           })
         } catch (err) {
           const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
-          if (!/Unable to capture screenshot/i.test(message)) {
+          const hitHeightLimit = /Unable to capture screenshot/i.test(message)
+          const clipOutsideBounds = /Clipped area is either empty or outside the resulting image/i.test(message)
+          const recoverableScreenshotError = hitHeightLimit || clipOutsideBounds
+          if (!recoverableScreenshotError) {
             throw err
           }
 
-          logger.warn('Full-page screenshot hit Chromium limit. Falling back to tiled capture.', {
+          const userFacingNotice = hitHeightLimit
+            ? 'This page is taller than Chromium\'s single-shot screenshot limit (~16K px)'
+            : 'Chromium could not capture the requested area in one shot'
+
+          logger.warn(userFacingNotice, {
             pageHeight,
+            chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
             error: message,
+            fallback: 'tiled-stitch',
           })
 
           await captureLargePageScreenshot(page, filename)
