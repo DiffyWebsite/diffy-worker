@@ -4,24 +4,7 @@
 // file-content -- if we pass job file as json as parameter
 // output-filepath -- path to a file to save the results in json format. Used by wrapper.
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes timeout
-
-const parseTimeoutMs = (value) => {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
-  }
-
-  return parsed;
-};
-
-const timeout = parseTimeoutMs(process.env.PLAYWRIGHT_WORKER_TIMEOUT_MS) ??
-  parseTimeoutMs(process.env.WORKER_TIMEOUT_MS) ??
-  DEFAULT_TIMEOUT_MS;
+const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000; // 12 minutes timeout
 
 const process = require('process');
 const debug = !!process.env.DEBUG;
@@ -120,7 +103,7 @@ process.on('unhandledRejection', (reason, p) => {
   const chromiumBrowser = new ChromiumBrowser(debug, local)
 
   let shutdownTimeout = null;
-  let shutdownDeadlineTs = handlerTimeExecuteStart + timeout;
+  let shutdownDeadlineTs = handlerTimeExecuteStart + DEFAULT_TIMEOUT_MS;
 
   const triggerTimeout = async () => {
     try {
@@ -144,9 +127,9 @@ process.on('unhandledRejection', (reason, p) => {
 
     const requestedDuration = (Number.isFinite(numericCandidate) && numericCandidate > 0)
       ? numericCandidate
-      : timeout;
+      : DEFAULT_TIMEOUT_MS;
 
-    const effectiveDuration = Math.max(requestedDuration, timeout);
+    const effectiveDuration = Math.max(requestedDuration, DEFAULT_TIMEOUT_MS);
     const proposedDeadline = handlerTimeExecuteStart + effectiveDuration;
 
     if (proposedDeadline > shutdownDeadlineTs) {
@@ -171,7 +154,7 @@ process.on('unhandledRejection', (reason, p) => {
     shutdownTimeout = setTimeout(triggerTimeout, remainingMs);
   };
 
-  scheduleShutdown(timeout);
+  scheduleShutdown(DEFAULT_TIMEOUT_MS);
 
   try {
     let proxy = null
@@ -191,7 +174,7 @@ process.on('unhandledRejection', (reason, p) => {
 
     const delaySec = Number(data?.params?.delay_before_screenshot || 0);
     const extraBufferMs = Math.min(Math.max(delaySec, 0) * 3000 + 120000, 20 * 60 * 1000);
-    const baseHandler = Math.max(timeout, 5 * 60 * 1000 + extraBufferMs);
+    const baseHandler = Math.max(DEFAULT_TIMEOUT_MS, 5 * 60 * 1000 + extraBufferMs);
 
     scheduleShutdown(baseHandler);
     browser = await chromiumBrowser.getBrowser(proxy)
