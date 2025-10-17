@@ -762,201 +762,227 @@ module.exports = {
       return Promise.resolve()
     }
 
-    await page.evaluate((_fixtures) => {
+    const persistDelays = Array.isArray(job.args.fixture_reapply_delays_ms)
+      ? job.args.fixture_reapply_delays_ms
+      : [250, 750, 1500]
 
-      function diffyImageFixture (el, selector) {
-        const deriveDimensions = () => {
-          if (!el) return null
-          const width = Math.round(el.naturalWidth || el.width || el.clientWidth || 0)
-          const height = Math.round(el.naturalHeight || el.height || el.clientHeight || 0)
-          if (width <= 0 || height <= 0) {
-            return null
-          }
-          return { width, height }
+    const summary = await page.evaluate(async ({ fixtures, persistDelaysMs }) => {
+      if (!Array.isArray(fixtures) || !fixtures.length) {
+        return { attempts: 0, applied: 0 }
+      }
+
+      const deriveDimensions = (el) => {
+        if (!el) return null
+        const width = Math.round(el.naturalWidth || el.width || el.clientWidth || 0)
+        const height = Math.round(el.naturalHeight || el.height || el.clientHeight || 0)
+        if (width <= 0 || height <= 0) {
+          return null
         }
+        return { width, height }
+      }
 
-        return new Promise((resolve) => {
-          try {
-            const applyFixture = () => {
-              const dimensions = deriveDimensions()
-              const src = el?.src || null
-              if (!dimensions || !src) {
-                return resolve()
-              }
-
-              const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
-
-              const complete = () => {
-                el.removeEventListener('load', complete)
-                el.removeEventListener('error', fail)
-                resolve()
-              }
-
-              const fail = () => {
-                el.removeEventListener('load', complete)
-                el.removeEventListener('error', fail)
-                resolve()
-              }
-
-              el.addEventListener('load', complete, { once: true })
-              el.addEventListener('error', fail, { once: true })
-
-              el.src = targetSrc
-
-              if (el.hasAttribute('data-src')) {
-                el.setAttribute('data-src', targetSrc)
-              }
-
-              if (el.hasAttribute('srcset')) {
-                el.setAttribute('srcset', `${targetSrc} 1x`)
-              }
+      const diffyImageFixture = (el) => new Promise((resolve) => {
+        try {
+          const applyFixture = () => {
+            const dimensions = deriveDimensions(el)
+            const src = el?.src || null
+            if (!dimensions || !src) {
+              return resolve(false)
             }
 
-            const readyDimensions = deriveDimensions()
-            if (readyDimensions) {
-              applyFixture()
-              return
+            const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
+
+            const complete = () => {
+              el.removeEventListener('load', complete)
+              el.removeEventListener('error', fail)
+              resolve(true)
             }
 
-            const cleanupBootstrap = () => {
-              el.removeEventListener('load', settle)
-              el.removeEventListener('error', settle)
+            const fail = () => {
+              el.removeEventListener('load', complete)
+              el.removeEventListener('error', fail)
+              resolve(false)
             }
 
-            const settle = () => {
-              cleanupBootstrap()
-              const dimensions = deriveDimensions()
+            el.addEventListener('load', complete, { once: true })
+            el.addEventListener('error', fail, { once: true })
+
+            el.src = targetSrc
+
+            if (el.hasAttribute('data-src')) {
+              el.setAttribute('data-src', targetSrc)
+            }
+
+            if (el.hasAttribute('srcset')) {
+              el.setAttribute('srcset', `${targetSrc} 1x`)
+            }
+          }
+
+          const readyDimensions = deriveDimensions(el)
+          if (readyDimensions) {
+            applyFixture()
+            return
+          }
+
+          const cleanupBootstrap = () => {
+            el.removeEventListener('load', settle)
+            el.removeEventListener('error', settle)
+          }
+
+          const settle = () => {
+            cleanupBootstrap()
+            const dimensions = deriveDimensions(el)
+            if (!dimensions) {
+              return resolve(false)
+            }
+            applyFixture()
+          }
+
+          el.addEventListener('load', settle, { once: true })
+          el.addEventListener('error', settle, { once: true })
+
+          if (typeof el.decode === 'function') {
+            el.decode().then(() => {
+              const dimensions = deriveDimensions(el)
               if (!dimensions) {
-                return resolve()
+                return resolve(false)
               }
+              cleanupBootstrap()
               applyFixture()
-            }
-
-            el.addEventListener('load', settle, { once: true })
-            el.addEventListener('error', settle, { once: true })
-
-            if (typeof el.decode === 'function') {
-              el.decode().then(() => {
-                const dimensions = deriveDimensions()
-                if (!dimensions) {
-                  return resolve()
-                }
-                cleanupBootstrap()
-                applyFixture()
-              }).catch(() => {
-                cleanupBootstrap()
-                resolve()
-              })
-            }
-          } catch (e) {
-            return resolve()
+            }).catch(() => {
+              cleanupBootstrap()
+              resolve(false)
+            })
           }
-        })
-      }
+        } catch (_) {
+          resolve(false)
+        }
+      })
 
-      function diffyBackgroundImageFixture (el) {
-        return new Promise((resolve) => {
-          try {
-            const elStyle = el.currentStyle || window.getComputedStyle(el, false);
-            const backgroundImage = elStyle.backgroundImage.slice(4, -1).replace(/"/g, '');
-
-            if (!backgroundImage) {
-              // No background image
-              return resolve()
-            }
-
-            getImageInfo(backgroundImage)
-              .then((imageInfo) => {
-                if (imageInfo.width && imageInfo.height) {
-                    const newBackgroundImageSrc = `https://picsum.photos/id/0/${Math.round(imageInfo.width)}/${Math.round(imageInfo.height)}`;
-                    const newBackgroundImage = new Image();
-                    newBackgroundImage.addEventListener('load', () => {
-                        el.style.backgroundImage = 'url(' + newBackgroundImageSrc + ')';
-
-                        resolve();
-                    });
-                    newBackgroundImage.addEventListener('error', () => {
-                        resolve();
-                    });
-
-                    // @TODO add timeout in case image is not loaded
-
-                    newBackgroundImage.src = newBackgroundImageSrc;
-                } else {
-                    resolve();
-                }
-              })
-              .catch(() => {
-                return resolve()
-              })
-          } catch (e) {
-            // console.error('Failed to diffy image fixture', e) // TODO: Prettify error dump
-
-            return resolve()
-          }
-        })
-      }
-
-      function getImageInfo (url) {
-        return new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => reject();
-          img.src = url;
-        });
-      }
-
-      function diffyTextFixture (el, content) {
-        return new Promise((resolve) => {
-          try {
-            el.innerHTML = content
-          } catch (e) {
-            // console.error('Failed to diffy text fixture', e) // TODO: Prettify error dump
+      const diffyBackgroundImageFixture = (el) => new Promise((resolve) => {
+        try {
+          const elStyle = el.currentStyle || window.getComputedStyle(el, false)
+          const backgroundImageRaw = elStyle.backgroundImage
+          if (!backgroundImageRaw || backgroundImageRaw === 'none') {
+            return resolve(false)
           }
 
-          return resolve()
+          const urlMatch = backgroundImageRaw.match(/url\((['\"]?)(.*?)\1\)/i)
+          const backgroundImage = urlMatch ? urlMatch[2] : backgroundImageRaw
+          if (!backgroundImage) {
+            return resolve(false)
+          }
+
+          getImageInfo(backgroundImage)
+            .then((imageInfo) => {
+              if (imageInfo.width && imageInfo.height) {
+                const newBackgroundImageSrc = `https://picsum.photos/id/0/${Math.round(imageInfo.width)}/${Math.round(imageInfo.height)}`
+                const newBackgroundImage = new Image()
+                newBackgroundImage.addEventListener('load', () => {
+                  el.style.backgroundImage = 'url(' + newBackgroundImageSrc + ')'
+                  resolve(true)
+                })
+                newBackgroundImage.addEventListener('error', () => {
+                  resolve(false)
+                })
+                newBackgroundImage.src = newBackgroundImageSrc
+              } else {
+                resolve(false)
+              }
+            })
+            .catch(() => resolve(false))
+        } catch (_) {
+          resolve(false)
+        }
+      })
+
+      const diffyTextFixture = (el, content) => new Promise((resolve) => {
+        try {
+          el.innerHTML = content
+          resolve(true)
+        } catch (_) {
+          resolve(false)
+        }
+      })
+
+      const getImageInfo = (url) => new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('image load failed'))
+        img.src = url
+      })
+
+      const applyFixturesOnce = async () => {
+        const operations = []
+        let attempts = 0
+
+        fixtures.forEach((fixture) => {
+          const selector = fixture?.selector?.trim?.() || ''
+          if (!selector.length) {
+            return
+          }
+
+          const type = fixture?.type?.trim?.() || ''
+          const content = fixture?.content ?? ''
+          const nodes = document.querySelectorAll(selector)
+          if (!nodes?.length) {
+            return
+          }
+
+          nodes.forEach((element) => {
+            attempts += 1
+            if (type === 'image') {
+              operations.push(diffyImageFixture(element))
+            } else if (type === 'background image') {
+              operations.push(diffyBackgroundImageFixture(element))
+            } else {
+              operations.push(diffyTextFixture(element, content))
+            }
+          })
         })
-      }
 
-      const fixturePromises = []
-
-      for (let fixture of _fixtures) {
-        const selector = (fixture.selector) ? fixture.selector.trim() : ''
-        const type = (fixture.type) ? fixture.type.trim() : ''
-        const content = (fixture.content) ? fixture.content.trim() : ''
-
-        if (!selector.length) {
-          continue;
+        if (!operations.length) {
+          return { attempts, applied: 0 }
         }
 
-        const element = document.querySelectorAll(selector)
-
-        if (!element) {
-          continue;
-        }
-
-        const elementKeys = Object.keys(element)
-
-        for (let i = 0; i < elementKeys.length; ++i) {
-          if (type === 'image') {
-            fixturePromises.push(diffyImageFixture(element[elementKeys[i]], selector))
-          } else if (type === 'background image') {
-            fixturePromises.push(diffyBackgroundImageFixture(element[elementKeys[i]]))
-          } else {
-            fixturePromises.push(diffyTextFixture(element[elementKeys[i]], content))
+        const results = await Promise.allSettled(operations)
+        const applied = results.reduce((count, outcome) => {
+          if (outcome.status === 'fulfilled' && outcome.value) {
+            return count + 1
           }
-        }
+          return count
+        }, 0)
+
+        return { attempts, applied }
       }
 
-      if (fixturePromises.length) {
-        return Promise.all(fixturePromises)
-      } else {
-        return Promise.resolve()
+      const accumulated = { attempts: 0, applied: 0 }
+
+      const mergeResult = (result) => {
+        if (!result) return
+        accumulated.attempts += result.attempts || 0
+        accumulated.applied += result.applied || 0
       }
 
-    }, job.args.fixtures)
+      mergeResult(await applyFixturesOnce())
 
-    logger.debug('Diffy fixtures were added.')
+      if (Array.isArray(persistDelaysMs)) {
+        persistDelaysMs
+          .filter((delay) => typeof delay === 'number' && delay > 0)
+          .forEach((delay) => {
+            setTimeout(() => {
+              applyFixturesOnce().then(mergeResult).catch(() => {})
+            }, delay)
+          })
+      }
+
+      return accumulated
+    }, {
+      fixtures: job.args.fixtures,
+      persistDelaysMs: persistDelays,
+    })
+
+    logger.debug('Diffy fixtures were added.', summary)
 
     return page
   },
