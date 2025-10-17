@@ -4,7 +4,24 @@
 // file-content -- if we pass job file as json as parameter
 // output-filepath -- path to a file to save the results in json format. Used by wrapper.
 
-const timeout = 10 * 60 * 1000; // 10 minutes timeout
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes timeout
+
+const parseTimeoutMs = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+};
+
+const timeout = parseTimeoutMs(process.env.PLAYWRIGHT_WORKER_TIMEOUT_MS) ??
+  parseTimeoutMs(process.env.WORKER_TIMEOUT_MS) ??
+  DEFAULT_TIMEOUT_MS;
 
 const process = require('process');
 const debug = !!process.env.DEBUG;
@@ -103,21 +120,55 @@ process.on('unhandledRejection', (reason, p) => {
   const chromiumBrowser = new ChromiumBrowser(debug, local)
 
   let shutdownTimeout = null;
-  const scheduleShutdown = (timeoutMs) => {
+  let shutdownDeadlineTs = handlerTimeExecuteStart + timeout;
+
+  const triggerTimeout = async () => {
+    try {
+      const result = await executor.timeout(handlerTimeExecuteStart)
+      executor.shutdown()
+      logger.warn('Timeout', result);
+      process.exit(1);
+    } catch (e) {
+      process.exit(1);
+    }
+  };
+
+  const scheduleShutdown = (requestedTimeoutMs) => {
     if (shutdownTimeout) {
       clearTimeout(shutdownTimeout);
     }
 
-    shutdownTimeout = setTimeout(async () => {
-      try {
-        const result = await executor.timeout(handlerTimeExecuteStart)
-        executor.shutdown()
-        logger.warn('Timeout', result);
-        process.exit(1);
-      } catch (e) {
-        process.exit(1);
-      }
-    }, timeoutMs);
+    const numericCandidate = Number.isFinite(requestedTimeoutMs)
+      ? requestedTimeoutMs
+      : Number.parseInt(requestedTimeoutMs, 10);
+
+    const requestedDuration = (Number.isFinite(numericCandidate) && numericCandidate > 0)
+      ? numericCandidate
+      : timeout;
+
+    const effectiveDuration = Math.max(requestedDuration, timeout);
+    const proposedDeadline = handlerTimeExecuteStart + effectiveDuration;
+
+    if (proposedDeadline > shutdownDeadlineTs) {
+      shutdownDeadlineTs = proposedDeadline;
+    }
+
+    const remainingMs = Math.max(Math.round(shutdownDeadlineTs - performance.now()), 0);
+
+    if (debug) {
+      logger.debug('scheduleShutdown', {
+        requestedTimeoutMs,
+        effectiveTimeoutMs: shutdownDeadlineTs - handlerTimeExecuteStart,
+        remainingMs,
+      });
+    }
+
+    if (remainingMs <= 0) {
+      triggerTimeout().catch(() => process.exit(1));
+      return;
+    }
+
+    shutdownTimeout = setTimeout(triggerTimeout, remainingMs);
   };
 
   scheduleShutdown(timeout);
@@ -140,7 +191,7 @@ process.on('unhandledRejection', (reason, p) => {
 
     const delaySec = Number(data?.params?.delay_before_screenshot || 0);
     const extraBufferMs = Math.min(Math.max(delaySec, 0) * 3000 + 120000, 20 * 60 * 1000);
-    const baseHandler = 5 * 60 * 1000 + extraBufferMs;
+    const baseHandler = Math.max(timeout, 5 * 60 * 1000 + extraBufferMs);
 
     scheduleShutdown(baseHandler);
     browser = await chromiumBrowser.getBrowser(proxy)
