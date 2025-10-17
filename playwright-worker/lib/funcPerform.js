@@ -3,6 +3,11 @@ const uploadS3 = require('./uploadS3.js')
 const thumbnail = require('./thumbnail.js')
 const func = require('./func.js')
 const logger = require('./logger')
+const sharp = require('sharp')
+
+const MAX_TILE_OUTPUT_PX = 16000
+const MIN_TILE_CSS_HEIGHT = 1200
+const TILE_FALLBACK_BUFFER_MS = 50
 
 const sendResult = (job, jobItem, data) => {
   job.status = true
@@ -297,6 +302,92 @@ const safeWaitForFunction = async (page, predicate, options, label = 'waitForFun
 const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
   ensureOpen(page, label)
   return page.addStyleTag(opts)
+}
+
+const captureLargePageScreenshot = async (page, targetPath) => {
+  ensureOpen(page, 'large-screenshot preparation')
+
+  const metrics = await page.evaluate(() => ({
+    width: Math.ceil(document.documentElement.scrollWidth || window.innerWidth || 0),
+    height: Math.ceil(document.documentElement.scrollHeight || window.innerHeight || 0),
+    devicePixelRatio: window.devicePixelRatio || 1,
+  }))
+
+  if (!metrics.height || !metrics.width) {
+    throw new Error('Unable to determine page dimensions for tiled screenshot')
+  }
+
+  const cssDimensionLimit = Math.max(
+    MIN_TILE_CSS_HEIGHT,
+    Math.floor((MAX_TILE_OUTPUT_PX - 1) / Math.max(metrics.devicePixelRatio, 1)),
+  )
+
+  const clipWidthCss = Math.max(1, Math.min(metrics.width, cssDimensionLimit))
+  if (clipWidthCss < metrics.width) {
+    logger.warn('Page width exceeds Chromium limit. Cropping fallback screenshot width.', {
+      originalWidth: metrics.width,
+      effectiveWidth: clipWidthCss,
+      devicePixelRatio: metrics.devicePixelRatio,
+    })
+  }
+  const maxTileCssHeight = Math.max(MIN_TILE_CSS_HEIGHT, Math.min(cssDimensionLimit, metrics.height))
+
+  let remainingCssHeight = metrics.height
+  let offsetCssY = 0
+  let outputWidthPx = 0
+  let outputHeightPx = 0
+  const composites = []
+
+  while (remainingCssHeight > 0) {
+    const clipHeightCss = Math.min(maxTileCssHeight, remainingCssHeight)
+
+    ensureOpen(page, 'large-screenshot clip')
+    const buffer = await page.screenshot({
+      clip: {
+        x: 0,
+        y: offsetCssY,
+        width: clipWidthCss,
+        height: clipHeightCss,
+      },
+      omitBackground: false,
+      animations: 'disabled',
+    })
+
+    const metadata = await sharp(buffer).metadata()
+    if (!metadata?.height || !metadata?.width) {
+      throw new Error('Failed to read tile metadata for tiled screenshot')
+    }
+
+    if (!outputWidthPx) {
+      outputWidthPx = metadata.width
+    }
+
+    composites.push({ input: buffer, top: outputHeightPx, left: 0 })
+    outputHeightPx += metadata.height
+
+    remainingCssHeight -= clipHeightCss
+    offsetCssY += clipHeightCss
+
+    if (remainingCssHeight > 0) {
+      await page.waitForTimeout(TILE_FALLBACK_BUFFER_MS)
+    }
+  }
+
+  if (!outputWidthPx || !outputHeightPx) {
+    throw new Error('No tiles captured for tiled screenshot')
+  }
+
+  await sharp({
+    create: {
+      width: outputWidthPx,
+      height: outputHeightPx,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 0 },
+    }
+  })
+    .composite(composites)
+    .png()
+    .toFile(targetPath)
 }
 
 module.exports = {
@@ -757,11 +848,25 @@ module.exports = {
         await page.waitForTimeout(150)
 
         if (page.isClosed()) throw new Error('Page closed before capture')
-        await page.screenshot({
-          path: filename,
-          fullPage: true,
-          omitBackground: false
-        })
+        try {
+          await page.screenshot({
+            path: filename,
+            fullPage: true,
+            omitBackground: false
+          })
+        } catch (err) {
+          const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
+          if (!/Unable to capture screenshot/i.test(message)) {
+            throw err
+          }
+
+          logger.warn('Full-page screenshot hit Chromium limit. Falling back to tiled capture.', {
+            pageHeight,
+            error: message,
+          })
+
+          await captureLargePageScreenshot(page, filename)
+        }
 
         logger.debug('screenshot done')
         const pageHtml = await func.getPageHtml(page)
