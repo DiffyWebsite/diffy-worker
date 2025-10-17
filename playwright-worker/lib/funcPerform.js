@@ -322,11 +322,11 @@ const captureLargePageScreenshot = async (page, targetPath) => {
     Math.floor((MAX_TILE_OUTPUT_PX - 1) / Math.max(metrics.devicePixelRatio, 1)),
   )
 
-  const clipWidthCss = Math.max(1, Math.min(metrics.width, cssDimensionLimit))
-  if (clipWidthCss < metrics.width) {
+  const targetClipWidthCss = Math.max(1, Math.min(metrics.width, cssDimensionLimit))
+  if (targetClipWidthCss < metrics.width) {
     logger.warn('Page width exceeds Chromium limit. Cropping fallback screenshot width.', {
       originalWidth: metrics.width,
-      effectiveWidth: clipWidthCss,
+      effectiveWidth: targetClipWidthCss,
       devicePixelRatio: metrics.devicePixelRatio,
     })
   }
@@ -339,7 +339,36 @@ const captureLargePageScreenshot = async (page, targetPath) => {
   const composites = []
 
   while (remainingCssHeight > 0) {
-    const clipHeightCss = Math.min(maxTileCssHeight, remainingCssHeight)
+    let currentMetrics = metrics
+    if (offsetCssY > 0) {
+      ensureOpen(page, 'large-screenshot metrics refresh')
+      const refreshedMetrics = await page.evaluate(() => ({
+        width: Math.ceil(document.documentElement.scrollWidth || window.innerWidth || 0),
+        height: Math.ceil(document.documentElement.scrollHeight || window.innerHeight || 0),
+      }))
+      if (refreshedMetrics?.width) {
+        currentMetrics = { ...currentMetrics, width: refreshedMetrics.width }
+      }
+      if (refreshedMetrics?.height) {
+        currentMetrics = { ...currentMetrics, height: refreshedMetrics.height }
+      }
+    }
+
+    const currentWidthCss = Math.max(1, Math.ceil(currentMetrics.width || 0))
+    const currentHeightCss = Math.max(0, Math.ceil(currentMetrics.height || 0))
+    const remainingFromCurrent = Math.max(0, currentHeightCss - offsetCssY)
+    const clipHeightCss = Math.min(maxTileCssHeight, remainingCssHeight, remainingFromCurrent)
+    const clipWidthCss = Math.max(1, Math.min(targetClipWidthCss, currentWidthCss))
+
+    if (clipHeightCss <= 0 || clipWidthCss <= 0) {
+      logger.warn('Stopping tiled screenshot capture due to shrinking page bounds.', {
+        offsetCssY,
+        remainingCssHeight,
+        currentWidthCss,
+        currentHeightCss,
+      })
+      break
+    }
 
     ensureOpen(page, 'large-screenshot clip')
     const buffer = await page.screenshot({
