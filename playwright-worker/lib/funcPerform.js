@@ -545,8 +545,6 @@ module.exports = {
           logger.warn('Failed to grant permissions for origin', {error})
         }
 
-        await func.simulatePreNavigation(page, url)
-
         let response;
 
         try {
@@ -622,8 +620,6 @@ module.exports = {
 
         ensureOpen(page, 'post-fonts wait')
         await page.waitForTimeout(50)
-
-        await func.humanLikeInteraction(page)
 
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
         await safeEval(page, () => {
