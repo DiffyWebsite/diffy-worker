@@ -765,43 +765,90 @@ module.exports = {
     await page.evaluate((_fixtures) => {
 
       function diffyImageFixture (el, selector) {
-        return new Promise((resolve, reject) => {
+        const deriveDimensions = () => {
+          if (!el) return null
+          const width = Math.round(el.naturalWidth || el.width || el.clientWidth || 0)
+          const height = Math.round(el.naturalHeight || el.height || el.clientHeight || 0)
+          if (width <= 0 || height <= 0) {
+            return null
+          }
+          return { width, height }
+        }
+
+        return new Promise((resolve) => {
           try {
-            const w = el.width || null
-            const h = el.height || null
-            const src = el.src || null
+            const applyFixture = () => {
+              const dimensions = deriveDimensions()
+              const src = el?.src || null
+              if (!dimensions || !src) {
+                return resolve()
+              }
 
-            if (src && w && h) {
-              el.addEventListener('load', () => {
-                resolve();
-              });
-              el.addEventListener('error', (e) => {
-                // console.error('Failed to diffy image fixture', e) // TODO: Prettify error dump
-                reject(e);
-              });
+              const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
 
-              // @TODO add timeout in case image is not loaded
+              const complete = () => {
+                el.removeEventListener('load', complete)
+                el.removeEventListener('error', fail)
+                resolve()
+              }
 
-              /**
-               * @TODO check if we want to depend on picsum.photos service
-               * idea: copy images for all resolutions to s3 and expose via cloudfront (fast and stable)
-               */
+              const fail = () => {
+                el.removeEventListener('load', complete)
+                el.removeEventListener('error', fail)
+                resolve()
+              }
 
-              el.src = `https://picsum.photos/id/0/${w}/${h}`
+              el.addEventListener('load', complete, { once: true })
+              el.addEventListener('error', fail, { once: true })
+
+              el.src = targetSrc
 
               if (el.hasAttribute('data-src')) {
-                el.setAttribute('data-src', el.src)
+                el.setAttribute('data-src', targetSrc)
               }
 
               if (el.hasAttribute('srcset')) {
-                el.setAttribute('srcset', el.src + ' 1x')
+                el.setAttribute('srcset', `${targetSrc} 1x`)
               }
-            } else {
-              // console.error('Can\'t add diffy image fixture', selector, src, h, w) // TODO: Prettify error dump
-              return resolve()
+            }
+
+            const readyDimensions = deriveDimensions()
+            if (readyDimensions) {
+              applyFixture()
+              return
+            }
+
+            const cleanupBootstrap = () => {
+              el.removeEventListener('load', settle)
+              el.removeEventListener('error', settle)
+            }
+
+            const settle = () => {
+              cleanupBootstrap()
+              const dimensions = deriveDimensions()
+              if (!dimensions) {
+                return resolve()
+              }
+              applyFixture()
+            }
+
+            el.addEventListener('load', settle, { once: true })
+            el.addEventListener('error', settle, { once: true })
+
+            if (typeof el.decode === 'function') {
+              el.decode().then(() => {
+                const dimensions = deriveDimensions()
+                if (!dimensions) {
+                  return resolve()
+                }
+                cleanupBootstrap()
+                applyFixture()
+              }).catch(() => {
+                cleanupBootstrap()
+                resolve()
+              })
             }
           } catch (e) {
-            // console.error('Failed to diffy image fixture', e) // TODO: Prettify error dump
             return resolve()
           }
         })
