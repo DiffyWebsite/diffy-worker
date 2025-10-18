@@ -762,14 +762,41 @@ module.exports = {
       return Promise.resolve()
     }
 
-    const persistDelays = Array.isArray(job.args.fixture_reapply_delays_ms)
-      ? job.args.fixture_reapply_delays_ms
-      : [250, 750, 1500]
-
-    const summary = await page.evaluate(async ({ fixtures, persistDelaysMs }) => {
-      if (!Array.isArray(fixtures) || !fixtures.length) {
-        return { attempts: 0, applied: 0 }
+    const parseDelayCollection = (value) => {
+      if (Array.isArray(value)) {
+        return value
       }
+      if (typeof value === 'string') {
+        return value.split(/[\s,]+/)
+      }
+      return []
+    }
+
+    const defaultDelays = [250, 750, 1500]
+    const parsedDelays = parseDelayCollection(job.args.fixture_reapply_delays_ms)
+    const delayNumbers = parsedDelays
+      .map((delay) => Number.parseInt(delay, 10))
+      .filter((delay) => Number.isFinite(delay) && delay > 0)
+    const effectiveDelays = delayNumbers.length ? delayNumbers : defaultDelays
+
+    let persistWindowMs = effectiveDelays.length ? Math.max(...effectiveDelays) : 0
+    const persistOverride = Number.parseInt(
+      job.args.fixture_persist_ms ?? job.args.fixture_persist_window_ms,
+      10,
+    )
+    if (Number.isFinite(persistOverride) && persistOverride > 0) {
+      persistWindowMs = persistOverride
+    }
+    if (persistWindowMs > 0) {
+      persistWindowMs += 250
+    }
+
+    const summary = await page.evaluate(async ({ fixtures, persistWindowMs }) => {
+      if (!Array.isArray(fixtures) || !fixtures.length) {
+        return { attempts: 0, applied: 0, persistWindowMs }
+      }
+
+      const activeTextObservers = []
 
       const deriveDimensions = (el) => {
         if (!el) return null
@@ -787,25 +814,29 @@ module.exports = {
             const dimensions = deriveDimensions(el)
             const src = el?.src || null
             if (!dimensions || !src) {
-              return resolve(false)
+              resolve(false)
+              return
             }
 
             const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
 
-            const complete = () => {
-              el.removeEventListener('load', complete)
-              el.removeEventListener('error', fail)
+            const cleanup = () => {
+              el.removeEventListener('load', onLoad)
+              el.removeEventListener('error', onError)
+            }
+
+            const onLoad = () => {
+              cleanup()
               resolve(true)
             }
 
-            const fail = () => {
-              el.removeEventListener('load', complete)
-              el.removeEventListener('error', fail)
+            const onError = () => {
+              cleanup()
               resolve(false)
             }
 
-            el.addEventListener('load', complete, { once: true })
-            el.addEventListener('error', fail, { once: true })
+            el.addEventListener('load', onLoad, { once: true })
+            el.addEventListener('error', onError, { once: true })
 
             el.src = targetSrc
 
@@ -824,16 +855,13 @@ module.exports = {
             return
           }
 
-          const cleanupBootstrap = () => {
+          const settle = () => {
             el.removeEventListener('load', settle)
             el.removeEventListener('error', settle)
-          }
-
-          const settle = () => {
-            cleanupBootstrap()
             const dimensions = deriveDimensions(el)
             if (!dimensions) {
-              return resolve(false)
+              resolve(false)
+              return
             }
             applyFixture()
           }
@@ -843,14 +871,17 @@ module.exports = {
 
           if (typeof el.decode === 'function') {
             el.decode().then(() => {
+              el.removeEventListener('load', settle)
+              el.removeEventListener('error', settle)
               const dimensions = deriveDimensions(el)
               if (!dimensions) {
-                return resolve(false)
+                resolve(false)
+                return
               }
-              cleanupBootstrap()
               applyFixture()
             }).catch(() => {
-              cleanupBootstrap()
+              el.removeEventListener('load', settle)
+              el.removeEventListener('error', settle)
               resolve(false)
             })
           }
@@ -864,33 +895,40 @@ module.exports = {
           const elStyle = el.currentStyle || window.getComputedStyle(el, false)
           const backgroundImageRaw = elStyle.backgroundImage
           if (!backgroundImageRaw || backgroundImageRaw === 'none') {
-            return resolve(false)
+            resolve(false)
+            return
           }
 
           const urlMatch = backgroundImageRaw.match(/url\((['\"]?)(.*?)\1\)/i)
           const backgroundImage = urlMatch ? urlMatch[2] : backgroundImageRaw
           if (!backgroundImage) {
-            return resolve(false)
+            resolve(false)
+            return
           }
 
-          getImageInfo(backgroundImage)
-            .then((imageInfo) => {
-              if (imageInfo.width && imageInfo.height) {
-                const newBackgroundImageSrc = `https://picsum.photos/id/0/${Math.round(imageInfo.width)}/${Math.round(imageInfo.height)}`
-                const newBackgroundImage = new Image()
-                newBackgroundImage.addEventListener('load', () => {
-                  el.style.backgroundImage = 'url(' + newBackgroundImageSrc + ')'
-                  resolve(true)
-                })
-                newBackgroundImage.addEventListener('error', () => {
-                  resolve(false)
-                })
-                newBackgroundImage.src = newBackgroundImageSrc
-              } else {
-                resolve(false)
-              }
+          const original = new Image()
+          original.addEventListener('load', () => {
+            const width = Math.round(original.width || 0)
+            const height = Math.round(original.height || 0)
+            if (!width || !height) {
+              resolve(false)
+              return
+            }
+            const newBackgroundImageSrc = `https://picsum.photos/id/0/${width}/${height}`
+            const replacement = new Image()
+            replacement.addEventListener('load', () => {
+              el.style.backgroundImage = `url(${newBackgroundImageSrc})`
+              resolve(true)
             })
-            .catch(() => resolve(false))
+            replacement.addEventListener('error', () => {
+              resolve(false)
+            })
+            replacement.src = newBackgroundImageSrc
+          })
+          original.addEventListener('error', () => {
+            resolve(false)
+          })
+          original.src = backgroundImage
         } catch (_) {
           resolve(false)
         }
@@ -898,88 +936,109 @@ module.exports = {
 
       const diffyTextFixture = (el, content) => new Promise((resolve) => {
         try {
-          el.innerHTML = content
-          resolve(true)
+          if (!el) {
+            resolve(false)
+            return
+          }
+
+          let applying = false
+          const expected = String(content ?? '')
+
+          const applyFixture = () => {
+            if (!el) {
+              return false
+            }
+            if (applying) {
+              return true
+            }
+            applying = true
+            try {
+              if (el.innerHTML !== expected) {
+                el.innerHTML = expected
+              }
+              el.setAttribute('data-diffy-fixture', 'text')
+              el.setAttribute('data-diffy-fixture-hash', `${expected.length}`)
+            } catch (_) {
+              applying = false
+              return false
+            }
+            applying = false
+            return true
+          }
+
+          const applied = applyFixture()
+
+          if (persistWindowMs > 0 && typeof MutationObserver === 'function') {
+            const observer = new MutationObserver(() => {
+              applyFixture()
+            })
+            observer.observe(el, { childList: true, characterData: true, subtree: true })
+            activeTextObservers.push(() => {
+              try {
+                observer.disconnect()
+              } catch (_) {}
+            })
+          }
+
+          resolve(applied)
         } catch (_) {
           resolve(false)
         }
       })
 
-      const getImageInfo = (url) => new Promise((resolve, reject) => {
-        const img = new Image()
-        img.onload = () => resolve(img)
-        img.onerror = () => reject(new Error('image load failed'))
-        img.src = url
-      })
+      let attempts = 0
+      const operations = []
 
-      const applyFixturesOnce = async () => {
-        const operations = []
-        let attempts = 0
-
-        fixtures.forEach((fixture) => {
-          const selector = fixture?.selector?.trim?.() || ''
-          if (!selector.length) {
-            return
-          }
-
-          const type = fixture?.type?.trim?.() || ''
-          const content = fixture?.content ?? ''
-          const nodes = document.querySelectorAll(selector)
-          if (!nodes?.length) {
-            return
-          }
-
-          nodes.forEach((element) => {
-            attempts += 1
-            if (type === 'image') {
-              operations.push(diffyImageFixture(element))
-            } else if (type === 'background image') {
-              operations.push(diffyBackgroundImageFixture(element))
-            } else {
-              operations.push(diffyTextFixture(element, content))
-            }
-          })
-        })
-
-        if (!operations.length) {
-          return { attempts, applied: 0 }
+      fixtures.forEach((fixture) => {
+        const selector = fixture?.selector?.trim?.() || ''
+        if (!selector.length) {
+          return
+        }
+        const type = fixture?.type?.trim?.().toLowerCase() || ''
+        const content = fixture?.content ?? ''
+        const nodes = document.querySelectorAll(selector)
+        if (!nodes?.length) {
+          return
         }
 
-        const results = await Promise.allSettled(operations)
-        const applied = results.reduce((count, outcome) => {
-          if (outcome.status === 'fulfilled' && outcome.value) {
-            return count + 1
+        nodes.forEach((element) => {
+          attempts += 1
+          if (type === 'image') {
+            operations.push(diffyImageFixture(element))
+          } else if (type === 'background image') {
+            operations.push(diffyBackgroundImageFixture(element))
+          } else {
+            operations.push(diffyTextFixture(element, content))
           }
-          return count
-        }, 0)
+        })
+      })
 
-        return { attempts, applied }
+      if (!operations.length) {
+        return { attempts, applied: 0, persistWindowMs }
       }
 
-      const accumulated = { attempts: 0, applied: 0 }
+      const outcomes = await Promise.allSettled(operations)
+      const applied = outcomes.reduce((count, outcome) => {
+        if (outcome.status === 'fulfilled' && outcome.value) {
+          return count + 1
+        }
+        return count
+      }, 0)
 
-      const mergeResult = (result) => {
-        if (!result) return
-        accumulated.attempts += result.attempts || 0
-        accumulated.applied += result.applied || 0
+      if (persistWindowMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, persistWindowMs))
       }
 
-      mergeResult(await applyFixturesOnce())
+      activeTextObservers.forEach((cleanup) => {
+        try {
+          cleanup()
+        } catch (_) {}
+      })
 
-      if (Array.isArray(persistDelaysMs)) {
-        persistDelaysMs
-          .filter((delay) => typeof delay === 'number' && delay > 0)
-          .forEach((delay) => {
-            setTimeout(() => {
-              applyFixturesOnce().then(mergeResult).catch(() => {})
-            }, delay)
-          })
-      }
-
-      return accumulated
+      return { attempts, applied, persistWindowMs }
     }, {
       fixtures: job.args.fixtures,
-      persistDelaysMs: persistDelays,
+      persistWindowMs,
     })
 
     logger.debug('Diffy fixtures were added.', summary)
