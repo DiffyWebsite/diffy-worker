@@ -777,9 +777,9 @@ module.exports = {
     const delayNumbers = parsedDelays
       .map((delay) => Number.parseInt(delay, 10))
       .filter((delay) => Number.isFinite(delay) && delay > 0)
-    const effectiveDelays = delayNumbers.length ? delayNumbers : defaultDelays
+    const reapplyDelays = delayNumbers.length ? delayNumbers : defaultDelays
 
-    let persistWindowMs = effectiveDelays.length ? Math.max(...effectiveDelays) : 0
+    let persistWindowMs = reapplyDelays.length ? Math.max(...reapplyDelays) : 0
     const persistOverride = Number.parseInt(
       job.args.fixture_persist_ms ?? job.args.fixture_persist_window_ms,
       10,
@@ -787,217 +787,476 @@ module.exports = {
     if (Number.isFinite(persistOverride) && persistOverride > 0) {
       persistWindowMs = persistOverride
     }
-    if (persistWindowMs > 0) {
-      persistWindowMs += 250
-    }
 
-    const summary = await page.evaluate(async ({ fixtures, persistWindowMs }) => {
+    const summary = await page.evaluate(async ({ fixtures, reapplyDelays, persistWindowMs }) => {
       if (!Array.isArray(fixtures) || !fixtures.length) {
-        return { attempts: 0, applied: 0, persistWindowMs }
+        return {
+          attempts: 0,
+          applied: 0,
+          persistWindowMs,
+          watchersActive: false,
+          fixtureCount: 0,
+        }
       }
 
-      const activeTextObservers = []
+      const ensureManager = () => {
+        const existing = window.__diffyFixtureManager
+        if (existing && typeof existing.destroy === 'function') {
+          existing.destroy()
+        }
 
-      const deriveDimensions = (el) => {
-        if (!el) return null
-        const width = Math.round(el.naturalWidth || el.width || el.clientWidth || 0)
-        const height = Math.round(el.naturalHeight || el.height || el.clientHeight || 0)
-        if (width <= 0 || height <= 0) {
+        const getDescriptor = (node, prop) => {
+          let current = node
+          while (current) {
+            const descriptor = Object.getOwnPropertyDescriptor(current, prop)
+            if (descriptor) {
+              return descriptor
+            }
+            current = Object.getPrototypeOf(current)
+          }
           return null
         }
-        return { width, height }
-      }
 
-      const diffyImageFixture = (el) => new Promise((resolve) => {
-        try {
-          const applyFixture = () => {
-            const dimensions = deriveDimensions(el)
-            const src = el?.src || null
-            if (!dimensions || !src) {
-              resolve(false)
+        const manager = {
+          fixtures: [],
+          reapplyFixtures: [],
+          observers: [],
+          timers: [],
+          lockedMap: new Map(),
+          applyingDepth: 0,
+          isApplying () {
+            return this.applyingDepth > 0
+          },
+          incrementApplying () {
+            this.applyingDepth += 1
+          },
+          decrementApplying () {
+            if (this.applyingDepth > 0) {
+              this.applyingDepth -= 1
+            }
+          },
+          registerFixture (rawFixture) {
+            const selector = typeof rawFixture?.selector === 'string'
+              ? rawFixture.selector.trim()
+              : ''
+            if (!selector) {
               return
             }
 
-            const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
+            const rawType = typeof rawFixture?.type === 'string'
+              ? rawFixture.type.trim().toLowerCase()
+              : ''
+            const type = rawType === 'image'
+              ? 'image'
+              : (rawType === 'background image' || rawType === 'background-image')
+                ? 'background'
+                : 'text'
 
-            const cleanup = () => {
-              el.removeEventListener('load', onLoad)
-              el.removeEventListener('error', onError)
+            const entry = {
+              selector,
+              type,
+              apply: null,
+              reapply: type === 'text',
             }
 
-            const onLoad = () => {
-              cleanup()
-              resolve(true)
+            if (entry.type === 'text') {
+              const rawContent = rawFixture?.content
+              const contentString = typeof rawContent === 'string'
+                ? rawContent
+                : (rawContent ?? '').toString()
+              entry.content = contentString
+              entry.hashValue = `${contentString.length}`
+              entry.locked = new WeakMap()
+
+              const lockNode = (node) => {
+                if (!node) {
+                  return null
+                }
+                let setterMap = entry.locked.get(node)
+                if (setterMap) {
+                  return setterMap
+                }
+
+                setterMap = {}
+                const lockedProps = manager.lockedMap.get(node) || new Set()
+
+                const props = ['innerHTML', 'textContent', 'innerText']
+                for (const prop of props) {
+                  const descriptor = getDescriptor(node, prop)
+                  if (!descriptor || typeof descriptor.set !== 'function') {
+                    continue
+                  }
+
+                  const originalSetter = descriptor.set.bind(node)
+                  const originalGetter = descriptor.get ? descriptor.get.bind(node) : null
+
+                  setterMap[prop] = originalSetter
+
+                  const lockedDescriptor = {
+                    configurable: true,
+                    enumerable: descriptor.enumerable,
+                    get () {
+                      if (originalGetter) {
+                        try {
+                          return originalGetter()
+                        } catch (_) {
+                          return contentString
+                        }
+                      }
+                      return contentString
+                    },
+                    set () {
+                      try {
+                        originalSetter(contentString)
+                      } catch (_) {}
+                      try {
+                        node.setAttribute('data-diffy-fixture', 'text')
+                        node.setAttribute('data-diffy-fixture-hash', entry.hashValue)
+                      } catch (_) {}
+                    },
+                  }
+
+                  try {
+                    Object.defineProperty(node, prop, lockedDescriptor)
+                    lockedProps.add(prop)
+                  } catch (_) {}
+                }
+
+                if (lockedProps.size) {
+                  manager.lockedMap.set(node, lockedProps)
+                  entry.locked.set(node, setterMap)
+                }
+
+                return setterMap
+              }
+
+              entry.apply = (node) => {
+                if (!node) {
+                  return false
+                }
+
+                const setterMap = lockNode(node) || {}
+                const expected = entry.content
+                let changed = false
+
+                if (node.innerHTML !== expected) {
+                  manager.incrementApplying()
+                  try {
+                    if (typeof setterMap.innerHTML === 'function') {
+                      setterMap.innerHTML(expected)
+                    } else {
+                      node.innerHTML = expected
+                    }
+                    changed = true
+                  } catch (_) {
+                    changed = false
+                  } finally {
+                    manager.decrementApplying()
+                  }
+                }
+
+                try {
+                  node.setAttribute('data-diffy-fixture', 'text')
+                  node.setAttribute('data-diffy-fixture-hash', entry.hashValue)
+                } catch (_) {}
+
+                return changed
+              }
+
+              this.reapplyFixtures.push(entry)
+            } else if (entry.type === 'image') {
+              entry.apply = (node) => new Promise((resolve) => {
+                try {
+                  const deriveDimensions = () => {
+                    const width = Math.round(node.naturalWidth || node.width || node.clientWidth || 0)
+                    const height = Math.round(node.naturalHeight || node.height || node.clientHeight || 0)
+                    if (!width || !height) {
+                      return null
+                    }
+                    return { width, height }
+                  }
+
+                  const swapSource = () => {
+                    const dimensions = deriveDimensions()
+                    const currentSrc = node?.src || null
+                    if (!dimensions || !currentSrc) {
+                      resolve(false)
+                      return
+                    }
+
+                    const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
+                    if (currentSrc === targetSrc) {
+                      resolve(false)
+                      return
+                    }
+
+                    const cleanup = () => {
+                      node.removeEventListener('load', onLoad)
+                      node.removeEventListener('error', onError)
+                    }
+
+                    const onLoad = () => {
+                      cleanup()
+                      resolve(true)
+                    }
+
+                    const onError = () => {
+                      cleanup()
+                      resolve(false)
+                    }
+
+                    node.addEventListener('load', onLoad, { once: true })
+                    node.addEventListener('error', onError, { once: true })
+
+                    node.src = targetSrc
+
+                    if (node.hasAttribute('data-src')) {
+                      node.setAttribute('data-src', targetSrc)
+                    }
+
+                    if (node.hasAttribute('srcset')) {
+                      node.setAttribute('srcset', `${targetSrc} 1x`)
+                    }
+                  }
+
+                  const initialDims = deriveDimensions()
+                  if (initialDims) {
+                    swapSource()
+                    return
+                  }
+
+                  const bootstrap = () => {
+                    node.removeEventListener('load', bootstrap)
+                    node.removeEventListener('error', bootstrap)
+                    const dimensions = deriveDimensions()
+                    if (!dimensions) {
+                      resolve(false)
+                      return
+                    }
+                    swapSource()
+                  }
+
+                  node.addEventListener('load', bootstrap, { once: true })
+                  node.addEventListener('error', bootstrap, { once: true })
+
+                  if (typeof node.decode === 'function') {
+                    node.decode().then(() => {
+                      node.removeEventListener('load', bootstrap)
+                      node.removeEventListener('error', bootstrap)
+                      const dimensions = deriveDimensions()
+                      if (!dimensions) {
+                        resolve(false)
+                        return
+                      }
+                      swapSource()
+                    }).catch(() => {
+                      node.removeEventListener('load', bootstrap)
+                      node.removeEventListener('error', bootstrap)
+                      resolve(false)
+                    })
+                  }
+                } catch (_) {
+                  resolve(false)
+                }
+              })
+            } else {
+              entry.apply = (node) => new Promise((resolve) => {
+                try {
+                  const elStyle = node.currentStyle || window.getComputedStyle(node, false)
+                  const backgroundImageRaw = elStyle.backgroundImage
+                  if (!backgroundImageRaw || backgroundImageRaw === 'none') {
+                    resolve(false)
+                    return
+                  }
+
+                  const urlMatch = backgroundImageRaw.match(/url\((['\"]?)(.*?)\1\)/i)
+                  const backgroundImage = urlMatch ? urlMatch[2] : backgroundImageRaw
+                  if (!backgroundImage) {
+                    resolve(false)
+                    return
+                  }
+
+                  const original = new Image()
+                  original.addEventListener('load', () => {
+                    const width = Math.round(original.width || 0)
+                    const height = Math.round(original.height || 0)
+                    if (!width || !height) {
+                      resolve(false)
+                      return
+                    }
+                    const newBackgroundImageSrc = `https://picsum.photos/id/0/${width}/${height}`
+                    const replacement = new Image()
+                    replacement.addEventListener('load', () => {
+                      node.style.backgroundImage = `url(${newBackgroundImageSrc})`
+                      resolve(true)
+                    })
+                    replacement.addEventListener('error', () => {
+                      resolve(false)
+                    })
+                    replacement.src = newBackgroundImageSrc
+                  })
+                  original.addEventListener('error', () => {
+                    resolve(false)
+                  })
+                  original.src = backgroundImage
+                } catch (_) {
+                  resolve(false)
+                }
+              })
             }
 
-            const onError = () => {
-              cleanup()
-              resolve(false)
+            this.fixtures.push(entry)
+          },
+          applyFixture (entry, { recordMetrics = true } = {}) {
+            const nodes = Array.from(document.querySelectorAll(entry.selector))
+            if (!nodes.length) {
+              return Promise.resolve({ attempts: 0, applied: 0 })
             }
 
-            el.addEventListener('load', onLoad, { once: true })
-            el.addEventListener('error', onError, { once: true })
+            const tasks = nodes.map((node) => {
+              try {
+                const outcome = entry.apply(node)
+                return outcome && typeof outcome.then === 'function'
+                  ? outcome.then(Boolean)
+                  : Promise.resolve(Boolean(outcome))
+              } catch (_) {
+                return Promise.resolve(false)
+              }
+            })
 
-            el.src = targetSrc
+            return Promise.allSettled(tasks).then((results) => {
+              if (!recordMetrics) {
+                return { attempts: 0, applied: 0 }
+              }
 
-            if (el.hasAttribute('data-src')) {
-              el.setAttribute('data-src', targetSrc)
+              let applied = 0
+              results.forEach((result) => {
+                if (result.status === 'fulfilled' && result.value) {
+                  applied += 1
+                }
+              })
+
+              return {
+                attempts: nodes.length,
+                applied,
+              }
+            })
+          },
+          applyAll ({ recordMetrics = true, reapplyOnly = false } = {}) {
+            const targets = reapplyOnly ? this.reapplyFixtures : this.fixtures
+            if (!targets.length) {
+              return Promise.resolve({ attempts: 0, applied: 0 })
             }
 
-            if (el.hasAttribute('srcset')) {
-              el.setAttribute('srcset', `${targetSrc} 1x`)
-            }
-          }
+            const applies = targets.map((entry) => this.applyFixture(entry, { recordMetrics }))
 
-          const readyDimensions = deriveDimensions(el)
-          if (readyDimensions) {
-            applyFixture()
-            return
-          }
+            return Promise.all(applies).then((results) => {
+              if (!recordMetrics) {
+                return { attempts: 0, applied: 0 }
+              }
 
-          const settle = () => {
-            el.removeEventListener('load', settle)
-            el.removeEventListener('error', settle)
-            const dimensions = deriveDimensions(el)
-            if (!dimensions) {
-              resolve(false)
+              return results.reduce((acc, result) => {
+                acc.attempts += result.attempts || 0
+                acc.applied += result.applied || 0
+                return acc
+              }, { attempts: 0, applied: 0 })
+            })
+          },
+          scheduleReapply () {
+            if (!this.reapplyFixtures.length || this.scheduled) {
               return
             }
-            applyFixture()
-          }
-
-          el.addEventListener('load', settle, { once: true })
-          el.addEventListener('error', settle, { once: true })
-
-          if (typeof el.decode === 'function') {
-            el.decode().then(() => {
-              el.removeEventListener('load', settle)
-              el.removeEventListener('error', settle)
-              const dimensions = deriveDimensions(el)
-              if (!dimensions) {
-                resolve(false)
+            this.scheduled = true
+            Promise.resolve().then(() => {
+              this.scheduled = false
+              this.applyAll({ recordMetrics: false, reapplyOnly: true }).catch(() => {})
+            })
+          },
+          activateObservers () {
+            if (!this.reapplyFixtures.length || typeof MutationObserver !== 'function') {
+              return
+            }
+            const target = document.documentElement || document.body
+            if (!target) {
+              return
+            }
+            const observer = new MutationObserver(() => {
+              if (this.isApplying()) {
                 return
               }
-              applyFixture()
-            }).catch(() => {
-              el.removeEventListener('load', settle)
-              el.removeEventListener('error', settle)
-              resolve(false)
+              this.scheduleReapply()
             })
-          }
-        } catch (_) {
-          resolve(false)
+            observer.observe(target, { childList: true, characterData: true, subtree: true })
+            this.observers.push(observer)
+          },
+          destroy () {
+            this.observers.forEach((observer) => {
+              try {
+                observer.disconnect()
+              } catch (_) {}
+            })
+            this.observers = []
+
+            this.timers.forEach((handle) => {
+              clearTimeout(handle)
+            })
+            this.timers = []
+
+            this.lockedMap.forEach((props, node) => {
+              props.forEach((prop) => {
+                try {
+                  delete node[prop]
+                } catch (_) {}
+              })
+              try {
+                if (node.dataset) {
+                  delete node.dataset.diffyFixture
+                  delete node.dataset.diffyFixtureHash
+                }
+              } catch (_) {}
+            })
+            this.lockedMap.clear()
+
+            this.fixtures = []
+            this.reapplyFixtures = []
+            this.applyingDepth = 0
+          },
         }
-      })
 
-      const diffyBackgroundImageFixture = (el) => new Promise((resolve) => {
-        try {
-          const elStyle = el.currentStyle || window.getComputedStyle(el, false)
-          const backgroundImageRaw = elStyle.backgroundImage
-          if (!backgroundImageRaw || backgroundImageRaw === 'none') {
-            resolve(false)
-            return
-          }
+        window.__diffyFixtureManager = manager
+        return manager
+      }
 
-          const urlMatch = backgroundImageRaw.match(/url\((['\"]?)(.*?)\1\)/i)
-          const backgroundImage = urlMatch ? urlMatch[2] : backgroundImageRaw
-          if (!backgroundImage) {
-            resolve(false)
-            return
-          }
+      const manager = ensureManager()
+      const normalizedFixtures = fixtures.filter((fixture) => fixture && typeof fixture.selector === 'string')
 
-          const original = new Image()
-          original.addEventListener('load', () => {
-            const width = Math.round(original.width || 0)
-            const height = Math.round(original.height || 0)
-            if (!width || !height) {
-              resolve(false)
-              return
-            }
-            const newBackgroundImageSrc = `https://picsum.photos/id/0/${width}/${height}`
-            const replacement = new Image()
-            replacement.addEventListener('load', () => {
-              el.style.backgroundImage = `url(${newBackgroundImageSrc})`
-              resolve(true)
-            })
-            replacement.addEventListener('error', () => {
-              resolve(false)
-            })
-            replacement.src = newBackgroundImageSrc
-          })
-          original.addEventListener('error', () => {
-            resolve(false)
-          })
-          original.src = backgroundImage
-        } catch (_) {
-          resolve(false)
-        }
-      })
+      normalizedFixtures.forEach((fixture) => manager.registerFixture(fixture))
 
-      function diffyTextFixture (el, content) {
-        return new Promise((resolve) => {
-          try {
-            el.innerHTML = content
-          } catch (e) {
-            logger.debug('Failed to diffy text fixture', e)
-          }
+      const metrics = await manager.applyAll({ recordMetrics: true })
 
-          return resolve()
+      if (manager.reapplyFixtures.length) {
+        manager.activateObservers()
+      }
+
+      if (Array.isArray(reapplyDelays) && reapplyDelays.length) {
+        reapplyDelays.forEach((delay) => {
+          const handle = setTimeout(() => {
+            manager.applyAll({ recordMetrics: false, reapplyOnly: true }).catch(() => {})
+          }, delay)
+          manager.timers.push(handle)
         })
       }
 
-      let attempts = 0
-      const operations = []
-
-      fixtures.forEach((fixture) => {
-        const selector = fixture?.selector?.trim?.() || ''
-        if (!selector.length) {
-          return
-        }
-        const type = fixture?.type?.trim?.().toLowerCase() || ''
-        const content = fixture?.content ?? ''
-        const nodes = document.querySelectorAll(selector)
-        if (!nodes?.length) {
-          return
-        }
-
-        nodes.forEach((element) => {
-          attempts += 1
-          if (type === 'image') {
-            operations.push(diffyImageFixture(element))
-          } else if (type === 'background image') {
-            operations.push(diffyBackgroundImageFixture(element))
-          } else {
-            operations.push(diffyTextFixture(element, content))
-          }
-        })
-      })
-
-      if (!operations.length) {
-        return { attempts, applied: 0, persistWindowMs }
+      return {
+        attempts: metrics.attempts,
+        applied: metrics.applied,
+        persistWindowMs,
+        watchersActive: manager.reapplyFixtures.length > 0 && typeof MutationObserver === 'function',
+        fixtureCount: normalizedFixtures.length,
       }
-
-      const outcomes = await Promise.allSettled(operations)
-      const applied = outcomes.reduce((count, outcome) => {
-        if (outcome.status === 'fulfilled' && outcome.value) {
-          return count + 1
-        }
-        return count
-      }, 0)
-
-      if (persistWindowMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, persistWindowMs))
-      }
-
-      activeTextObservers.forEach((cleanup) => {
-        try {
-          cleanup()
-        } catch (_) {}
-      })
-
-      return { attempts, applied, persistWindowMs }
     }, {
       fixtures: job.args.fixtures,
+      reapplyDelays,
       persistWindowMs,
     })
 
