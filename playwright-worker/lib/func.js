@@ -934,57 +934,17 @@ module.exports = {
         }
       })
 
-      const diffyTextFixture = (el, content) => new Promise((resolve) => {
-        try {
-          if (!el) {
-            resolve(false)
-            return
+      function diffyTextFixture (el, content) {
+        return new Promise((resolve) => {
+          try {
+            el.innerHTML = content
+          } catch (e) {
+            logger.debug('Failed to diffy text fixture', e)
           }
 
-          let applying = false
-          const expected = String(content ?? '')
-
-          const applyFixture = () => {
-            if (!el) {
-              return false
-            }
-            if (applying) {
-              return true
-            }
-            applying = true
-            try {
-              if (el.innerHTML !== expected) {
-                el.innerHTML = expected
-              }
-              el.setAttribute('data-diffy-fixture', 'text')
-              el.setAttribute('data-diffy-fixture-hash', `${expected.length}`)
-            } catch (_) {
-              applying = false
-              return false
-            }
-            applying = false
-            return true
-          }
-
-          const applied = applyFixture()
-
-          if (persistWindowMs > 0 && typeof MutationObserver === 'function') {
-            const observer = new MutationObserver(() => {
-              applyFixture()
-            })
-            observer.observe(el, { childList: true, characterData: true, subtree: true })
-            activeTextObservers.push(() => {
-              try {
-                observer.disconnect()
-              } catch (_) {}
-            })
-          }
-
-          resolve(applied)
-        } catch (_) {
-          resolve(false)
-        }
-      })
+          return resolve()
+        })
+      }
 
       let attempts = 0
       const operations = []
