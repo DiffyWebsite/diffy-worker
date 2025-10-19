@@ -1012,8 +1012,8 @@ module.exports = {
           })();
         }
 
-        let page_height = await func.updatePageViewport(page, jobItem, maxPageHeight)
-        logger.debug('updatePageViewport done', {page_height})
+        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
+        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
 
         if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
           await page.evaluate(async () => {
@@ -1079,7 +1079,40 @@ module.exports = {
 
         await func.autoScroll(page, jobItem)
         logger.debug('double autoScroll done')
-        const pageHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
+
+        const takeoverHeight = await page.evaluate(() => {
+          let maxHeight = Math.max(
+            document.documentElement?.scrollHeight || 0,
+            document.body?.scrollHeight || 0,
+            document.documentElement?.offsetHeight || 0,
+            document.body?.offsetHeight || 0,
+            document.documentElement?.clientHeight || 0,
+            document.body?.clientHeight || 0,
+            window.innerHeight || 0,
+          )
+
+          if (window.visualViewport) {
+            const vv = window.visualViewport
+            maxHeight = Math.max(maxHeight, Math.ceil((vv.pageTop || 0) + vv.height))
+          }
+
+          const elements = Array.from(document.querySelectorAll('*'))
+          for (const el of elements) {
+            const rect = el.getBoundingClientRect()
+            if (!rect) continue
+            const computed = window.getComputedStyle(el)
+            const marginBottom = parseFloat(computed.marginBottom || '0')
+            const localBottom = rect.bottom + window.scrollY + (Number.isFinite(marginBottom) ? marginBottom : 0)
+            if (Number.isFinite(localBottom)) {
+              maxHeight = Math.max(maxHeight, Math.ceil(localBottom))
+            }
+          }
+
+          return Math.max(0, Math.ceil(maxHeight))
+        })
+
+        const normalizedHeight = Math.min(takeoverHeight, maxPageHeight)
+        const pageHeight = await func.updatePageViewport(page, jobItem, normalizedHeight)
 
         data.pageArea = pageHeight * jobItem.breakpoint
 
