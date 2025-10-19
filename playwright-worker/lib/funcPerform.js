@@ -556,16 +556,68 @@ const captureLargePageScreenshot = async (page, targetPath) => {
     }
 
     ensureOpen(page, 'large-screenshot clip')
-    const buffer = await page.screenshot({
-      clip: {
-        x: 0,
-        y: offsetCssY,
-        width: clipWidthCss,
-        height: clipHeightCss,
-      },
-      omitBackground: false,
-      animations: 'disabled',
-    })
+    let buffer
+    try {
+      buffer = await page.screenshot({
+        clip: {
+          x: 0,
+          y: offsetCssY,
+          width: clipWidthCss,
+          height: clipHeightCss,
+        },
+        omitBackground: false,
+        animations: 'disabled',
+      })
+    } catch (err) {
+      const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
+      const recoverableClipError = /Clipped area is either empty or outside the resulting image/i.test(message)
+        || /Unable to capture screenshot/i.test(message)
+        || /Cannot take screenshot with 0 width or height/i.test(message)
+
+      if (!recoverableClipError) {
+        throw err
+      }
+
+      logger.warn('Tile capture fell outside page bounds; refreshing layout metrics.', {
+        error: message,
+        offsetCssY,
+        clipWidthCss,
+        clipHeightCss,
+      })
+
+      try {
+        const latestMetrics = await page.evaluate(() => ({
+          width: Math.ceil(document.documentElement.scrollWidth || window.innerWidth || 0),
+          height: Math.ceil(document.documentElement.scrollHeight || window.innerHeight || 0),
+        }))
+
+        if (latestMetrics?.width) {
+          metrics.width = Math.max(1, Math.ceil(latestMetrics.width))
+        }
+        if (latestMetrics?.height) {
+          metrics.height = Math.max(0, Math.ceil(latestMetrics.height))
+        }
+      } catch (metricsErr) {
+        logger.error('Failed to refresh layout metrics after clip error.', {
+          error: metricsErr?.message || String(metricsErr),
+        })
+        break
+      }
+
+      const refreshedRemaining = Math.max(0, Math.ceil(metrics.height || 0) - offsetCssY)
+      remainingCssHeight = refreshedRemaining
+
+      if (remainingCssHeight <= 0) {
+        logger.warn('Stopping tiled screenshot after clip failure due to shrinking bounds.', {
+          offsetCssY,
+          metricsHeight: metrics.height,
+        })
+        break
+      }
+
+      await page.waitForTimeout(TILE_FALLBACK_BUFFER_MS)
+      continue
+    }
 
     const metadata = await sharp(buffer).metadata()
     if (!metadata?.height || !metadata?.width) {
@@ -1070,33 +1122,48 @@ module.exports = {
         await page.waitForTimeout(150)
 
         if (page.isClosed()) throw new Error('Page closed before capture')
-        try {
-          await page.screenshot({
-            path: filename,
-            fullPage: true,
-            omitBackground: false
-          })
-        } catch (err) {
-          const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
-          const hitHeightLimit = /Unable to capture screenshot/i.test(message)
-          const clipOutsideBounds = /Clipped area is either empty or outside the resulting image/i.test(message)
-          const recoverableScreenshotError = hitHeightLimit || clipOutsideBounds
-          if (!recoverableScreenshotError) {
-            throw err
-          }
+        const deviceScaleFactor = contextOptions?.deviceScaleFactor ?? 1
+        const estimatedShotHeightPx = Math.ceil(pageHeight * deviceScaleFactor)
+        const exceedsSingleShotLimit = estimatedShotHeightPx > CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT
 
-          const userFacingNotice = hitHeightLimit
-            ? 'This page is taller than Chromium\'s single-shot screenshot limit (~16K px)'
-            : 'Chromium could not capture the requested area in one shot'
-
-          logger.warn(userFacingNotice, {
+        if (exceedsSingleShotLimit) {
+          logger.warn('Page height exceeds Chromium single-shot limit; using tiled capture.', {
             pageHeight,
+            deviceScaleFactor,
             chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
-            error: message,
             fallback: 'tiled-stitch',
           })
 
           await captureLargePageScreenshot(page, filename)
+        } else {
+          try {
+            await page.screenshot({
+              path: filename,
+              fullPage: true,
+              omitBackground: false
+            })
+          } catch (err) {
+            const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
+            const hitHeightLimit = /Unable to capture screenshot/i.test(message)
+            const clipOutsideBounds = /Clipped area is either empty or outside the resulting image/i.test(message)
+            const recoverableScreenshotError = hitHeightLimit || clipOutsideBounds
+            if (!recoverableScreenshotError) {
+              throw err
+            }
+
+            const userFacingNotice = hitHeightLimit
+              ? 'This page is taller than Chromium\'s single-shot screenshot limit (~16K px). Capturing it in multiple slices instead.'
+              : 'Chromium could not capture the requested area in one shot. Retrying by stitching multiple slices together.'
+
+            logger.warn(userFacingNotice, {
+              pageHeight,
+              chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
+              error: message,
+              fallback: 'tiled-stitch',
+            })
+
+            await captureLargePageScreenshot(page, filename)
+          }
         }
 
         logger.debug('screenshot done')
