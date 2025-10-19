@@ -794,17 +794,7 @@ module.exports = {
 
         await safeWaitForFunction(page, () => document.readyState === 'complete', undefined, 'readyState complete');
 
-        const stabilizationTimeoutOverride = Number.parseInt(jobItem?.args?.stabilization_timeout_ms ?? jobItem?.args?.stabilization_timeout, 10)
-        const stabilizationQuietWindowOverride = Number.parseInt(jobItem?.args?.stabilization_quiet_window_ms ?? jobItem?.args?.stabilization_quiet_window, 10)
-        const stabilizationOptions = {}
-        if (Number.isFinite(stabilizationTimeoutOverride) && stabilizationTimeoutOverride > 0) {
-          stabilizationOptions.totalTimeoutMs = stabilizationTimeoutOverride
-        }
-        if (Number.isFinite(stabilizationQuietWindowOverride) && stabilizationQuietWindowOverride > 0) {
-          stabilizationOptions.quietWindowMs = stabilizationQuietWindowOverride
-        }
-
-        const stabilitySummary = await waitForVisualStability(page, stabilizationOptions)
+        const stabilitySummary = await waitForVisualStability(page)
         logger.debug('visual stabilization complete', stabilitySummary)
 
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
@@ -976,6 +966,8 @@ module.exports = {
         await page.waitForTimeout(150)
 
         if (page.isClosed()) throw new Error('Page closed before capture')
+        const animationsSetting = jobItem?.args?.stabilization ? 'disabled' : undefined
+
         const captureViewportOnly = async (reason, extra = {}) => {
           ensureOpen(page, 'viewport-only capture')
 
@@ -1000,11 +992,16 @@ module.exports = {
             fallback: 'viewport-only',
           })
 
-          await page.screenshot({
+          const viewportScreenshotOptions = {
             path: filename,
             fullPage: false,
             omitBackground: false,
-          })
+          }
+          if (animationsSetting) {
+            viewportScreenshotOptions.animations = animationsSetting
+          }
+
+          await page.screenshot(viewportScreenshotOptions)
 
           if (viewportSize?.width && viewportSize?.height) {
             data.pageArea = viewportSize.width * viewportSize.height
@@ -1024,11 +1021,16 @@ module.exports = {
           })
         } else {
           try {
-            await page.screenshot({
+            const screenshotOptions = {
               path: filename,
               fullPage: true,
               omitBackground: false,
-            })
+            }
+            if (animationsSetting) {
+              screenshotOptions.animations = animationsSetting
+            }
+
+            await page.screenshot(screenshotOptions)
           } catch (err) {
             const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
             const hitHeightLimit = /Unable to capture screenshot/i.test(message)
