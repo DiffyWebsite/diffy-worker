@@ -3,11 +3,7 @@ const uploadS3 = require('./uploadS3.js')
 const thumbnail = require('./thumbnail.js')
 const func = require('./func.js')
 const logger = require('./logger')
-const sharp = require('sharp')
 
-const MAX_TILE_OUTPUT_PX = 16000
-const MIN_TILE_CSS_HEIGHT = 1200
-const TILE_FALLBACK_BUFFER_MS = 50
 const CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT = 16384
 const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
 const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
@@ -479,181 +475,6 @@ const waitForVisualStability = async (page, {
     imagesSettled,
     layoutSettled,
   }
-}
-
-const captureLargePageScreenshot = async (page, targetPath) => {
-  ensureOpen(page, 'large-screenshot preparation')
-
-  const metrics = await page.evaluate(() => ({
-    width: Math.ceil(document.documentElement.scrollWidth || window.innerWidth || 0),
-    height: Math.ceil(document.documentElement.scrollHeight || window.innerHeight || 0),
-    devicePixelRatio: window.devicePixelRatio || 1,
-  }))
-
-  if (!metrics.height || !metrics.width) {
-    throw new Error('Unable to determine page dimensions for tiled screenshot')
-  }
-
-  const cssDimensionLimit = Math.max(
-    MIN_TILE_CSS_HEIGHT,
-    Math.floor((MAX_TILE_OUTPUT_PX - 1) / Math.max(metrics.devicePixelRatio, 1)),
-  )
-
-  const targetClipWidthCss = Math.max(1, Math.min(metrics.width, cssDimensionLimit))
-  if (targetClipWidthCss < metrics.width) {
-    logger.warn('Page width exceeds Chromium limit. Cropping fallback screenshot width.', {
-      originalWidth: metrics.width,
-      effectiveWidth: targetClipWidthCss,
-      devicePixelRatio: metrics.devicePixelRatio,
-    })
-  }
-  const maxTileCssHeight = Math.max(MIN_TILE_CSS_HEIGHT, Math.min(cssDimensionLimit, metrics.height))
-
-  let remainingCssHeight = metrics.height
-  let offsetCssY = 0
-  let outputWidthPx = 0
-  let outputHeightPx = 0
-  const composites = []
-
-  logger.info('Assembling stitched screenshot fallback.', {
-    cssHeight: metrics.height,
-    cssWidth: metrics.width,
-    devicePixelRatio: metrics.devicePixelRatio,
-    tileCssHeight: maxTileCssHeight,
-    tileCssWidth: targetClipWidthCss,
-  })
-
-  while (remainingCssHeight > 0) {
-    let currentMetrics = metrics
-    if (offsetCssY > 0) {
-      ensureOpen(page, 'large-screenshot metrics refresh')
-      const refreshedMetrics = await page.evaluate(() => ({
-        width: Math.ceil(document.documentElement.scrollWidth || window.innerWidth || 0),
-        height: Math.ceil(document.documentElement.scrollHeight || window.innerHeight || 0),
-      }))
-      if (refreshedMetrics?.width) {
-        currentMetrics = { ...currentMetrics, width: refreshedMetrics.width }
-      }
-      if (refreshedMetrics?.height) {
-        currentMetrics = { ...currentMetrics, height: refreshedMetrics.height }
-      }
-    }
-
-    const currentWidthCss = Math.max(1, Math.ceil(currentMetrics.width || 0))
-    const currentHeightCss = Math.max(0, Math.ceil(currentMetrics.height || 0))
-    const remainingFromCurrent = Math.max(0, currentHeightCss - offsetCssY)
-    const clipHeightCss = Math.min(maxTileCssHeight, remainingCssHeight, remainingFromCurrent)
-    const clipWidthCss = Math.max(1, Math.min(targetClipWidthCss, currentWidthCss))
-
-    if (clipHeightCss <= 0 || clipWidthCss <= 0) {
-      logger.warn('Page resized while capturing; stopping stitched screenshot at new bounds.', {
-        offsetCssY,
-        remainingCssHeight,
-        currentWidthCss,
-        currentHeightCss,
-      })
-      break
-    }
-
-    ensureOpen(page, 'large-screenshot clip')
-    let buffer
-    try {
-      buffer = await page.screenshot({
-        clip: {
-          x: 0,
-          y: offsetCssY,
-          width: clipWidthCss,
-          height: clipHeightCss,
-        },
-        omitBackground: false,
-        animations: 'disabled',
-      })
-    } catch (err) {
-      const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
-      const recoverableClipError = /Clipped area is either empty or outside the resulting image/i.test(message)
-        || /Unable to capture screenshot/i.test(message)
-        || /Cannot take screenshot with 0 width or height/i.test(message)
-
-      if (!recoverableClipError) {
-        throw err
-      }
-
-      logger.warn('Tile capture fell outside page bounds; refreshing layout metrics.', {
-        error: message,
-        offsetCssY,
-        clipWidthCss,
-        clipHeightCss,
-      })
-
-      try {
-        const latestMetrics = await page.evaluate(() => ({
-          width: Math.ceil(document.documentElement.scrollWidth || window.innerWidth || 0),
-          height: Math.ceil(document.documentElement.scrollHeight || window.innerHeight || 0),
-        }))
-
-        if (latestMetrics?.width) {
-          metrics.width = Math.max(1, Math.ceil(latestMetrics.width))
-        }
-        if (latestMetrics?.height) {
-          metrics.height = Math.max(0, Math.ceil(latestMetrics.height))
-        }
-      } catch (metricsErr) {
-        logger.error('Failed to refresh layout metrics after clip error.', {
-          error: metricsErr?.message || String(metricsErr),
-        })
-        break
-      }
-
-      const refreshedRemaining = Math.max(0, Math.ceil(metrics.height || 0) - offsetCssY)
-      remainingCssHeight = refreshedRemaining
-
-      if (remainingCssHeight <= 0) {
-        logger.warn('Stopping tiled screenshot after clip failure due to shrinking bounds.', {
-          offsetCssY,
-          metricsHeight: metrics.height,
-        })
-        break
-      }
-
-      await page.waitForTimeout(TILE_FALLBACK_BUFFER_MS)
-      continue
-    }
-
-    const metadata = await sharp(buffer).metadata()
-    if (!metadata?.height || !metadata?.width) {
-      throw new Error('Failed to read tile metadata for tiled screenshot')
-    }
-
-    if (!outputWidthPx) {
-      outputWidthPx = metadata.width
-    }
-
-    composites.push({ input: buffer, top: outputHeightPx, left: 0 })
-    outputHeightPx += metadata.height
-
-    remainingCssHeight -= clipHeightCss
-    offsetCssY += clipHeightCss
-
-    if (remainingCssHeight > 0) {
-      await page.waitForTimeout(TILE_FALLBACK_BUFFER_MS)
-    }
-  }
-
-  if (!outputWidthPx || !outputHeightPx) {
-    throw new Error('No tiles captured for tiled screenshot')
-  }
-
-  await sharp({
-    create: {
-      width: outputWidthPx,
-      height: outputHeightPx,
-      channels: 4,
-      background: { r: 255, g: 255, b: 255, alpha: 0 },
-    }
-  })
-    .composite(composites)
-    .png()
-    .toFile(targetPath)
 }
 
 module.exports = {
@@ -1155,25 +976,58 @@ module.exports = {
         await page.waitForTimeout(150)
 
         if (page.isClosed()) throw new Error('Page closed before capture')
+        const captureViewportOnly = async (reason, extra = {}) => {
+          ensureOpen(page, 'viewport-only capture')
+
+          try {
+            await page.evaluate(() => window.scrollTo(0, 0))
+          } catch (_) {}
+
+          try {
+            await page.setViewportSize(baseViewport)
+          } catch (_) {}
+
+          await page.waitForTimeout(50)
+
+          const viewportSize = typeof page.viewportSize === 'function'
+            ? page.viewportSize()
+            : baseViewport
+
+          logger.warn(reason, {
+            ...extra,
+            viewportWidth: viewportSize?.width,
+            viewportHeight: viewportSize?.height,
+            fallback: 'viewport-only',
+          })
+
+          await page.screenshot({
+            path: filename,
+            fullPage: false,
+            omitBackground: false,
+          })
+
+          if (viewportSize?.width && viewportSize?.height) {
+            data.pageArea = viewportSize.width * viewportSize.height
+          }
+        }
+
         const deviceScaleFactor = contextOptions?.deviceScaleFactor ?? 1
         const estimatedShotHeightPx = Math.ceil(pageHeight * deviceScaleFactor)
         const exceedsSingleShotLimit = estimatedShotHeightPx > CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT
 
         if (exceedsSingleShotLimit) {
-          logger.warn('Page height exceeds Chromium single-shot limit; using tiled capture.', {
+          await captureViewportOnly('Page height exceeds Chromium single-shot limit; capturing visible area only.', {
             pageHeight,
             deviceScaleFactor,
+            estimatedShotHeightPx,
             chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
-            fallback: 'tiled-stitch',
           })
-
-          await captureLargePageScreenshot(page, filename)
         } else {
           try {
             await page.screenshot({
               path: filename,
               fullPage: true,
-              omitBackground: false
+              omitBackground: false,
             })
           } catch (err) {
             const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
@@ -1184,18 +1038,11 @@ module.exports = {
               throw err
             }
 
-            const userFacingNotice = hitHeightLimit
-              ? 'This page is taller than Chromium\'s single-shot screenshot limit (~16K px). Capturing it in multiple slices instead.'
-              : 'Chromium could not capture the requested area in one shot. Retrying by stitching multiple slices together.'
-
-            logger.warn(userFacingNotice, {
+            await captureViewportOnly('Chromium could not capture the requested area in one shot; capturing visible area instead.', {
               pageHeight,
               chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
               error: message,
-              fallback: 'tiled-stitch',
             })
-
-            await captureLargePageScreenshot(page, filename)
           }
         }
 
