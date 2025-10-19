@@ -658,8 +658,7 @@ module.exports = {
         }
 
         context = await browser.newContext(contextOptions);
-        await func.applyHeadersToContext(context, headerConfig);
-        await func.applyStealth(context, headerConfig);
+        await func.setHeaders(context, jobItem, headerConfig);
         page = await context.newPage();
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {

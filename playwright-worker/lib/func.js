@@ -12,8 +12,6 @@ const DEFAULT_ACCEPT_LANGUAGE = 'en-US,en;q=0.9'
 const DEFAULT_CLIENT_HINT_PLATFORM = '"Windows"'
 const DEFAULT_LANGUAGES = ['en-US', 'en']
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
 const describeError = (err) => {
   if (!err) {
     return 'unknown error'
@@ -38,80 +36,27 @@ const ensurePageOpen = (page, label = 'operation') => {
   }
 }
 
-const randomIntegerBetween = (min, max) => {
-  if (max <= min) {
-    return min
-  }
-  return crypto.randomInt(min, max + 1)
+const PRIMARY_BROWSER_PROFILE = {
+  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.85 Safari/537.36',
+  locale: 'en-US',
+  languages: ['en-US', 'en'],
+  timezoneId: 'America/New_York',
+  platform: 'Windows',
+  hardwareConcurrency: 12,
+  deviceMemory: 8,
+  devicePixelRatio: 1.25,
+  brands: [
+    { brand: 'Not_A Brand', version: '8' },
+    { brand: 'Chromium', version: '131' },
+    { brand: 'Google Chrome', version: '131' }
+  ],
+  platformVersion: '15.0.0',
+  architecture: 'x86',
+  bitness: '64',
+  maxTouchPoints: 1,
+  webglVendor: 'Google Inc. (NVIDIA)',
+  webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Ti Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)'
 }
-
-const randomFloatBetween = (min, max) => Math.random() * (max - min) + min
-
-const BROWSER_PROFILES = [
-  {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.85 Safari/537.36',
-    locale: 'en-US',
-    languages: ['en-US', 'en'],
-    timezoneId: 'America/New_York',
-    platform: 'Windows',
-    hardwareConcurrency: 12,
-    deviceMemory: 8,
-    devicePixelRatio: 1.25,
-    brands: [
-      { brand: 'Not_A Brand', version: '8' },
-      { brand: 'Chromium', version: '131' },
-      { brand: 'Google Chrome', version: '131' }
-    ],
-    platformVersion: '15.0.0',
-    architecture: 'x86',
-    bitness: '64',
-    maxTouchPoints: 1,
-    webglVendor: 'Google Inc. (NVIDIA)',
-    webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Ti Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)'
-  },
-  {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.92 Safari/537.36',
-    locale: 'en-US',
-    languages: ['en-US', 'en', 'en-GB'],
-    timezoneId: 'America/Los_Angeles',
-    platform: 'macOS',
-    hardwareConcurrency: 8,
-    deviceMemory: 8,
-    devicePixelRatio: 2,
-    brands: [
-      { brand: 'Not_A Brand', version: '8' },
-      { brand: 'Chromium', version: '130' },
-      { brand: 'Google Chrome', version: '130' }
-    ],
-    platformVersion: '14.0.0',
-    architecture: 'x86',
-    bitness: '64',
-    maxTouchPoints: 3,
-    webglVendor: 'Google Inc. (ATI Technologies Inc.)',
-    webglRenderer: 'ANGLE (ATI Technologies Inc., AMD Radeon Pro 560X OpenGL Engine, OpenGL 4.1)'
-  },
-  {
-    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.6668.90 Safari/537.36',
-    locale: 'en-GB',
-    languages: ['en-GB', 'en'],
-    timezoneId: 'Europe/London',
-    platform: 'Linux',
-    hardwareConcurrency: 16,
-    deviceMemory: 16,
-    devicePixelRatio: 1,
-    brands: [
-      { brand: 'Not_A Brand', version: '8' },
-      { brand: 'Chromium', version: '129' },
-      { brand: 'Google Chrome', version: '129' }
-    ],
-    platformVersion: '6.8.0',
-    architecture: 'x86',
-    bitness: '64',
-    maxTouchPoints: 1,
-    webglVendor: 'Google Inc. (Intel Inc.)',
-    webglRenderer: 'ANGLE (Intel Inc., Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)'
-  }
-]
 
 const buildAcceptLanguageHeader = (languages = DEFAULT_LANGUAGES) => {
   if (!languages?.length) {
@@ -343,7 +288,7 @@ const buildHeaderConfig = (job) => {
 
   if (!userAgentString.length) {
     // Use a single, consistent profile for stable VRT runs.
-    profile = BROWSER_PROFILES[0]
+    profile = PRIMARY_BROWSER_PROFILE
     userAgentString = profile.userAgent
   } else {
     profile = {
@@ -408,267 +353,6 @@ const applyHeadersToContext = async (context, headerConfig) => {
   if (headerConfig?.extraHeaders && Object.keys(headerConfig.extraHeaders).length) {
     await context.setExtraHTTPHeaders(headerConfig.extraHeaders)
   }
-}
-
-const applyStealthToContext = async (context, clientHints) => {
-  if (!context || typeof context.addInitScript !== 'function') {
-    return
-  }
-
-  const hints = clientHints || buildClientHintMetadata()
-  const config = {
-    brands: hints.brands || [
-      { brand: 'Not_A Brand', version: '8' },
-      { brand: 'Chromium', version: '120' },
-      { brand: 'Google Chrome', version: '120' }
-    ],
-    platform: hints.platform || 'Windows',
-    mobile: typeof hints.mobile === 'boolean' ? hints.mobile : false,
-    uaFullVersion: hints.uaFullVersion || '120.0.0.0',
-    hardwareConcurrency: hints.hardwareConcurrency || 8,
-    deviceMemory: hints.deviceMemory || 8,
-    languages: hints.languages || DEFAULT_LANGUAGES,
-    maxTouchPoints: typeof hints.maxTouchPoints === 'number' ? hints.maxTouchPoints : 1,
-    devicePixelRatio: hints.devicePixelRatio || 1,
-    architecture: hints.architecture || 'x86',
-    bitness: hints.bitness || '64',
-    locale: hints.locale || DEFAULT_LANGUAGES[0],
-    timeZone: clientHints?.timezoneId || 'UTC',
-    webglVendor: clientHints?.webglVendor || 'Google Inc.',
-    webglRenderer: clientHints?.webglRenderer || 'ANGLE (Google Inc., Vulkan 1.3) ',
-    plugins: [
-      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-      { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
-    ],
-  }
-
-  await context.addInitScript((cfg) => {
-    try {
-      const override = (object, property, value) => {
-        Object.defineProperty(object, property, {
-          get: () => value,
-          configurable: true,
-        })
-      }
-
-      override(Navigator.prototype, 'webdriver', undefined)
-
-      if (!window.chrome) {
-        Object.defineProperty(window, 'chrome', {
-          value: { runtime: {} },
-          configurable: true,
-        })
-      } else if (!window.chrome.runtime) {
-        window.chrome.runtime = {}
-      }
-
-      override(Navigator.prototype, 'languages', cfg.languages)
-      override(Navigator.prototype, 'language', cfg.languages?.[0] || 'en-US')
-      override(Navigator.prototype, 'platform', cfg.platform)
-      override(Navigator.prototype, 'hardwareConcurrency', cfg.hardwareConcurrency)
-      override(Navigator.prototype, 'deviceMemory', cfg.deviceMemory)
-      override(Navigator.prototype, 'maxTouchPoints', cfg.maxTouchPoints)
-
-      Object.defineProperty(Navigator.prototype, 'plugins', {
-        get: () => cfg.plugins,
-        configurable: true,
-      })
-
-      const originalQuery = navigator.permissions.query.bind(navigator.permissions)
-      navigator.permissions.query = (parameters) => (
-        parameters && parameters.name === 'notifications'
-          ? Promise.resolve({ state: Notification.permission })
-          : originalQuery(parameters)
-      )
-
-      const createPermissionStatus = (state) => ({ state, onchange: null })
-      const permissionOverrides = {
-        microphone: 'granted',
-        camera: 'granted',
-        notifications: Notification.permission,
-        geolocation: 'granted',
-        midi: 'denied',
-        clipboard: 'granted',
-      }
-
-      navigator.permissions.query = async (descriptor) => {
-        const name = descriptor && descriptor.name
-        if (name && name in permissionOverrides) {
-          return createPermissionStatus(permissionOverrides[name])
-        }
-        return originalQuery(descriptor)
-      }
-
-      const brandEntries = cfg.brands.map(({ brand, version }) => ({ brand, version }))
-
-      const userAgentDataPayload = {
-        brands: brandEntries,
-        mobile: cfg.mobile,
-        platform: cfg.platform,
-        getHighEntropyValues: async (keys) => {
-          const data = {
-            brands: brandEntries,
-            mobile: cfg.mobile,
-            platform: cfg.platform,
-            architecture: 'x86',
-            bitness: '64',
-            model: '',
-            uaFullVersion: cfg.uaFullVersion,
-            fullVersionList: brandEntries.map(({ brand, version }) => ({ brand, version: cfg.uaFullVersion })),
-          }
-
-          const result = {}
-          if (Array.isArray(keys)) {
-            keys.forEach((key) => {
-              if (Object.hasOwn(data, key)) {
-                result[key] = data[key]
-              }
-            })
-          }
-
-          return result
-        },
-        toJSON: () => ({
-          brands: brandEntries,
-          mobile: cfg.mobile,
-          platform: cfg.platform,
-        }),
-      }
-
-      if (!navigator.userAgentData) {
-        Object.defineProperty(navigator, 'userAgentData', {
-          get: () => userAgentDataPayload,
-          configurable: true,
-        })
-      }
-
-      if (!window.navigator.connection) {
-        Object.defineProperty(window.navigator, 'connection', {
-          value: {
-            downlink: 10,
-            effectiveType: '4g',
-            rtt: 50,
-            saveData: false,
-          },
-          configurable: true,
-        })
-      }
-
-      try {
-        Object.defineProperty(window, 'devicePixelRatio', {
-          get: () => cfg.devicePixelRatio,
-          configurable: true,
-        })
-      } catch (err) {}
-
-      const patchGetParameter = (proto) => {
-        if (!proto || !proto.prototype) return
-        const originalGetParameter = proto.prototype.getParameter
-        Object.defineProperty(proto.prototype, 'getParameter', {
-          value: function (parameter) {
-            if (parameter === this.RENDERER || parameter === this.UNMASKED_RENDERER_WEBGL) {
-              return cfg.webglRenderer
-            }
-            if (parameter === this.VENDOR || parameter === this.UNMASKED_VENDOR_WEBGL) {
-              return cfg.webglVendor
-            }
-            return originalGetParameter.call(this, parameter)
-          },
-        })
-      }
-
-      patchGetParameter(window.WebGLRenderingContext)
-      patchGetParameter(window.WebGL2RenderingContext)
-
-      if (!window.navigator.mediaDevices) {
-        window.navigator.mediaDevices = {}
-      }
-
-      const fakeDevice = (kind, label) => ({
-        deviceId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-        groupId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-        kind,
-        label,
-      })
-
-      window.navigator.mediaDevices.enumerateDevices = async () => ([
-        fakeDevice('audioinput', 'External Microphone'),
-        fakeDevice('audiooutput', 'Internal Speakers'),
-        fakeDevice('videoinput', 'Integrated Webcam'),
-      ])
-
-      const geolocation = {
-        getCurrentPosition: (success, error) => {
-          const coords = {
-            latitude: 40.7128,
-            longitude: -74.0060,
-            accuracy: 12,
-            altitudeAccuracy: 8,
-          }
-          success?.({ coords, timestamp: Date.now() })
-        },
-        watchPosition: (success) => {
-          const id = setInterval(() => {
-            geolocation.getCurrentPosition(success)
-          }, 60000)
-          return id
-        },
-        clearWatch: (id) => clearInterval(id),
-      }
-
-      if (!navigator.geolocation) {
-        Object.defineProperty(navigator, 'geolocation', {
-          value: geolocation,
-          configurable: true,
-        })
-      }
-
-      if (!navigator.clipboard) {
-        Object.defineProperty(navigator, 'clipboard', {
-          value: {
-            writeText: async () => {},
-            readText: async () => '',
-          },
-          configurable: true,
-        })
-      }
-
-      const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions
-      Intl.DateTimeFormat.prototype.resolvedOptions = function (...args) {
-        const options = originalResolvedOptions.apply(this, args) || {}
-        options.timeZone = cfg.timeZone
-        options.locale = cfg.locale
-        return options
-      }
-
-      const originalOffset = Date.prototype.getTimezoneOffset
-      Date.prototype.getTimezoneOffset = function () {
-        try {
-          const formatter = Intl.DateTimeFormat('en-US', { timeZone: cfg.timeZone, timeZoneName: 'short' })
-          const parts = formatter.formatToParts(this)
-          const zoneName = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT'
-          if (/GMT([+-]\d{2})/.test(zoneName)) {
-            const sign = zoneName.includes('-') ? -1 : 1
-            const hours = parseInt(zoneName.slice(4, 6), 10)
-            return -sign * hours * 60
-          }
-        } catch (error) {}
-        return originalOffset.call(this)
-      }
-
-      const originalCanvasToDataURL = HTMLCanvasElement.prototype.toDataURL
-      HTMLCanvasElement.prototype.toDataURL = function (...args) {
-        const context = this.getContext('2d')
-        if (context) {
-          context.getImageData(0, 0, 1, 1)
-        }
-        return originalCanvasToDataURL.apply(this, args)
-      }
-    } catch (error) {
-      // Swallow stealth init errors to avoid leaking to the page context.
-    }
-  }, config)
 }
 
 module.exports = {
@@ -1432,15 +1116,6 @@ module.exports = {
     return buildHeaderConfig(job)
   },
 
-  applyHeadersToContext: async (context, headerConfig) => {
-    await applyHeadersToContext(context, headerConfig)
-  },
-
-  applyStealth: async (context, hintsOrHeaderConfig = null) => {
-    const hints = hintsOrHeaderConfig?.clientHints || hintsOrHeaderConfig
-    await applyStealthToContext(context, hints)
-  },
-
   handleCloudflareChallenge: async (page, options = {}) => {
     return handleCloudflareChallenge(page, options)
   },
@@ -1462,10 +1137,9 @@ module.exports = {
   //   fs.emptyDirSync(tmp)
   // },
 
-  setHeaders: async (context, job) => {
-    const headerConfig = buildHeaderConfig(job)
+  setHeaders: async (context, job, precomputedConfig = null) => {
+    const headerConfig = precomputedConfig ?? buildHeaderConfig(job)
     await applyHeadersToContext(context, headerConfig)
-    await applyStealthToContext(context, headerConfig.clientHints)
     return headerConfig
   },
 
