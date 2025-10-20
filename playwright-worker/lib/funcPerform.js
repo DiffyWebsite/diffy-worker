@@ -3,6 +3,8 @@ const uploadS3 = require('./uploadS3.js')
 const thumbnail = require('./thumbnail.js')
 const func = require('./func.js')
 const logger = require('./logger')
+const sharp = require('sharp')
+const fsPromises = require('node:fs/promises')
 
 const CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT = 16384
 const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
@@ -966,6 +968,7 @@ module.exports = {
         await page.waitForTimeout(150)
 
         if (page.isClosed()) throw new Error('Page closed before capture')
+
         const animationsSetting = jobItem?.args?.stabilization ? 'disabled' : undefined
 
         const captureViewportOnly = async (reason, extra = {}) => {
@@ -997,6 +1000,7 @@ module.exports = {
             fullPage: false,
             omitBackground: false,
           }
+
           if (animationsSetting) {
             viewportScreenshotOptions.animations = animationsSetting
           }
@@ -1012,13 +1016,146 @@ module.exports = {
         const estimatedShotHeightPx = Math.ceil(pageHeight * deviceScaleFactor)
         const exceedsSingleShotLimit = estimatedShotHeightPx > CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT
 
-        if (exceedsSingleShotLimit) {
-          await captureViewportOnly('Page height exceeds Chromium single-shot limit; capturing visible area only.', {
+        // Capture successive strips within Chromium's per-image height cap and stitch them.
+        const captureSegmentedScreenshot = async () => {
+          ensureOpen(page, 'segmented capture setup')
+
+          const cssLimitPerSegment = Math.max(
+            1,
+            Math.floor(CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT / deviceScaleFactor)
+          )
+          const normalizedPageHeight = Math.ceil(pageHeight)
+          const viewportWidthCss = Number.parseInt(jobItem.breakpoint, 10) || baseViewport.width || 0
+
+          if (!viewportWidthCss || !Number.isFinite(viewportWidthCss)) {
+            throw new Error('Invalid viewport width calculated for segmented capture')
+          }
+
+          const maxSegmentHeightCss = Math.min(cssLimitPerSegment, normalizedPageHeight)
+          if (!maxSegmentHeightCss || !Number.isFinite(maxSegmentHeightCss)) {
+            throw new Error('Invalid segment height calculated for segmented capture')
+          }
+
+          const segmentDescriptors = []
+          let offsetCss = 0
+          let partIndex = 0
+
+          logger.debug('Using segmented screenshot pipeline', {
             pageHeight,
+            normalizedPageHeight,
+            viewportWidthCss,
+            cssLimitPerSegment,
+            maxSegmentHeightCss,
             deviceScaleFactor,
-            estimatedShotHeightPx,
-            chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
           })
+
+          while (offsetCss < normalizedPageHeight) {
+            ensureOpen(page, `segmented capture part ${partIndex}`)
+
+            const remainingCss = Math.max(0, normalizedPageHeight - offsetCss)
+            const captureHeightCss = Math.min(maxSegmentHeightCss, remainingCss)
+
+            if (captureHeightCss <= 0) {
+              break
+            }
+
+            const clip = {
+              x: 0,
+              y: Math.max(0, Math.round(offsetCss)),
+              width: Math.round(viewportWidthCss),
+              height: Math.round(captureHeightCss),
+            }
+
+            const partPath = `/tmp/screenshot-${filenameKey}-part-${partIndex}.png`
+
+            const segmentScreenshotOptions = {
+              path: partPath,
+              clip,
+              omitBackground: false,
+            }
+
+            if (animationsSetting) {
+              segmentScreenshotOptions.animations = animationsSetting
+            }
+
+            await page.screenshot(segmentScreenshotOptions)
+
+            const metadata = await sharp(partPath).metadata()
+            if (!metadata?.height || !metadata?.width) {
+              throw new Error(`Segment metadata missing dimensions for part ${partIndex}`)
+            }
+
+            segmentDescriptors.push({
+              path: partPath,
+              heightPx: metadata.height,
+              widthPx: metadata.width,
+            })
+
+            offsetCss += captureHeightCss
+            partIndex += 1
+          }
+
+          if (!segmentDescriptors.length) {
+            throw new Error('Segmented capture produced no segments')
+          }
+
+          const totalHeightPx = segmentDescriptors.reduce((sum, seg) => sum + seg.heightPx, 0)
+          const outputWidthPx = segmentDescriptors.reduce((max, seg) => (
+            seg.widthPx > max ? seg.widthPx : max
+          ), 0)
+
+          if (!outputWidthPx || !Number.isFinite(outputWidthPx)) {
+            throw new Error('Segmented capture produced an invalid composite width')
+          }
+
+          let compositeOffset = 0
+          const composites = segmentDescriptors.map((seg) => {
+            const entry = { input: seg.path, left: 0, top: compositeOffset }
+            compositeOffset += seg.heightPx
+            return entry
+          })
+
+          await sharp({
+            create: {
+              width: outputWidthPx,
+              height: totalHeightPx,
+              channels: 4,
+              background: { r: 0, g: 0, b: 0, alpha: 0 },
+            },
+          })
+            .composite(composites)
+            .png()
+            .toFile(filename)
+
+          await Promise.all(
+            segmentDescriptors.map((seg) => fsPromises.unlink(seg.path).catch(() => {}))
+          )
+        }
+
+        if (exceedsSingleShotLimit) {
+          try {
+            await captureSegmentedScreenshot()
+          } catch (segmentedErr) {
+            const message = segmentedErr && Object.hasOwn(segmentedErr, 'message')
+              ? segmentedErr.message
+              : String(segmentedErr)
+
+            logger.warn('Segmented screenshot capture failed; falling back to viewport-only capture.', {
+              error: message,
+              pageHeight,
+              deviceScaleFactor,
+              estimatedShotHeightPx,
+              chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
+            })
+
+            await captureViewportOnly('Segmented capture failure; captured visible area instead.', {
+              pageHeight,
+              deviceScaleFactor,
+              estimatedShotHeightPx,
+              chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
+              error: message,
+            })
+          }
         } else {
           try {
             const screenshotOptions = {
@@ -1026,6 +1163,7 @@ module.exports = {
               fullPage: true,
               omitBackground: false,
             }
+
             if (animationsSetting) {
               screenshotOptions.animations = animationsSetting
             }
