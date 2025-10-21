@@ -937,51 +937,186 @@ module.exports = {
     }
 
     return page.evaluate((_elements) => {
-      const isVisible = (element) => {
-        const style = window.getComputedStyle(element);
-        return (
-            style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            style.opacity !== '0' &&
-            element.offsetWidth > 0 &&
-            element.offsetHeight > 0
-        );
-      };
-
-      const vrtPaintOver = (element) => {
-        if (!isVisible(element)) {
-          return;
+      const ensureMaskManager = () => {
+        if (window.__diffyMaskManager) {
+          return window.__diffyMaskManager
         }
 
-        const rect = element.getBoundingClientRect();
+        const overlays = new Map()
+        let scheduled = false
 
-        const overlay = document.createElement('div');
-        Object.assign(overlay.style, {
-          display: 'block',
-          position: 'absolute',
-          top: `${rect.top + window.scrollY}px`,
-          left: `${rect.left + window.scrollX}px`,
-          width: `${rect.width}px`,
-          height: `${rect.height}px`,
-          backgroundColor: 'green',
-          zIndex: '9999',
-          pointerEvents: 'none'
-        });
+        const clampPositive = (value, fallback) => {
+          const number = Number.parseFloat(value)
+          if (Number.isFinite(number) && number > 0) {
+            return number
+          }
+          return fallback
+        }
 
-        document.body.appendChild(overlay);
-      };
+        const syncOverlay = (entry) => {
+          if (!entry?.element || !entry.overlay || !entry.element.isConnected) {
+            if (entry?.resizeObserver) {
+              try {
+                entry.resizeObserver.disconnect()
+              } catch (_) {}
+            }
+            if (entry?.overlay?.isConnected) {
+              entry.overlay.remove()
+            }
+            overlays.delete(entry?.element)
+            return
+          }
 
-      window.scrollTo(0, 0)
+          const element = entry.element
+          const overlay = entry.overlay
+          const rect = element.getBoundingClientRect()
+          const computed = window.getComputedStyle(element)
 
-      _elements.forEach((selector) => {
-        selector = selector.trim();
-        if (!selector.length) return;
+          const widthCandidates = [
+            rect.width,
+            element.offsetWidth,
+            element.scrollWidth,
+            clampPositive(computed?.width, 0),
+          ].filter((candidate) => Number.isFinite(candidate) && candidate > 0)
 
-        document.querySelectorAll(selector).forEach((element) => {
-          vrtPaintOver(element);
-        });
-      });
-    }, job.args.elements);
+          const heightCandidates = [
+            rect.height,
+            element.offsetHeight,
+            element.scrollHeight,
+            clampPositive(computed?.height, 0),
+          ].filter((candidate) => Number.isFinite(candidate) && candidate > 0)
+
+          const width = widthCandidates.length ? Math.max(...widthCandidates) : 0
+          const height = heightCandidates.length ? Math.max(...heightCandidates) : 0
+
+          if (!width || !height) {
+            overlay.style.display = 'none'
+            return
+          }
+
+          overlay.style.display = 'block'
+          const extra = 2
+          const position = computed?.position || 'static'
+          const isFixed = position === 'fixed'
+          overlay.style.position = isFixed ? 'fixed' : 'absolute'
+          const top = isFixed ? rect.top : rect.top + window.scrollY
+          const left = isFixed ? rect.left : rect.left + window.scrollX
+          overlay.style.top = `${top - extra}px`
+          overlay.style.left = `${left - extra}px`
+          overlay.style.width = `${width + extra * 2}px`
+          overlay.style.height = `${height + extra * 2}px`
+          overlay.style.borderRadius = computed?.borderRadius || '0'
+        }
+
+        const scheduleSyncAll = () => {
+          if (scheduled) {
+            return
+          }
+          scheduled = true
+          requestAnimationFrame(() => {
+            scheduled = false
+            overlays.forEach((entry) => syncOverlay(entry))
+          })
+        }
+
+        window.addEventListener('scroll', scheduleSyncAll, { passive: true })
+        window.addEventListener('resize', scheduleSyncAll)
+
+        const manager = {
+          overlays,
+          scheduleSyncAll,
+          syncOverlay,
+          attach (element) {
+            if (!element || overlays.has(element)) {
+              scheduleSyncAll()
+              return
+            }
+
+            const overlay = document.createElement('div')
+            overlay.dataset.diffyMaskOverlay = 'true'
+            Object.assign(overlay.style, {
+              display: 'none',
+              position: 'absolute',
+              top: '0',
+              left: '0',
+              width: '0',
+              height: '0',
+              backgroundColor: '#00aa00',
+              opacity: '1',
+              mixBlendMode: 'normal',
+              pointerEvents: 'none',
+              margin: '0',
+              padding: '0',
+              border: '0',
+              zIndex: '2147483647',
+              boxSizing: 'border-box',
+              transform: 'translate3d(0,0,0)',
+            })
+
+            document.body.appendChild(overlay)
+
+            const entry = { element, overlay }
+
+            if (typeof ResizeObserver === 'function') {
+              entry.resizeObserver = new ResizeObserver(() => scheduleSyncAll())
+              try {
+                entry.resizeObserver.observe(element)
+              } catch (_) {}
+            }
+
+            overlays.set(element, entry)
+            syncOverlay(entry)
+          },
+        }
+
+        window.__diffyMaskManager = manager
+        return manager
+      }
+
+      const isVisible = (element) => {
+        if (!element) {
+          return false
+        }
+        const style = window.getComputedStyle(element)
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          parseFloat(style.opacity || '1') > 0 &&
+          (element.offsetWidth > 0 || element.offsetHeight > 0)
+        )
+      }
+
+      const manager = ensureMaskManager()
+
+      const selectors = Array.isArray(_elements)
+        ? _elements
+        : []
+
+      selectors.forEach((selector) => {
+        if (typeof selector !== 'string') {
+          return
+        }
+        const trimmed = selector.trim()
+        if (!trimmed.length) {
+          return
+        }
+
+        const nodes = Array.from(document.querySelectorAll(trimmed))
+        nodes.forEach((node) => {
+          if (!isVisible(node)) {
+            return
+          }
+          manager.attach(node)
+        })
+      })
+
+      manager.scheduleSyncAll()
+
+      return {
+        maskedSelectors: selectors.length,
+        maskedElements: manager.overlays.size,
+      }
+    }, job.args.elements)
   },
 
   updatePageViewport: async (page, job, maxPageHeight = null) => {
