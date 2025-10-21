@@ -473,6 +473,68 @@ module.exports = {
     }
 
     const summary = await page.evaluate(async ({ fixtures, reapplyDelays, persistWindowMs }) => {
+      const clampPositive = (value, fallback) => {
+        const number = Number.parseFloat(value)
+        if (Number.isFinite(number) && number > 0) {
+          return Math.round(number)
+        }
+        return fallback
+      }
+
+      const deriveBoxDimensions = (node, fallbackWidth = 300, fallbackHeight = 200) => {
+        if (!node) {
+          return { width: fallbackWidth, height: fallbackHeight }
+        }
+
+        const style = window.getComputedStyle(node)
+        const rect = typeof node.getBoundingClientRect === 'function'
+          ? node.getBoundingClientRect()
+          : { width: 0, height: 0 }
+
+        const candidatesWidth = [
+          node.naturalWidth,
+          node.width,
+          node.clientWidth,
+          clampPositive(node.getAttribute?.('width'), 0),
+          clampPositive(style?.width, 0),
+          clampPositive(rect?.width, 0),
+        ].filter(value => Number.isFinite(value) && value > 0)
+
+        const candidatesHeight = [
+          node.naturalHeight,
+          node.height,
+          node.clientHeight,
+          clampPositive(node.getAttribute?.('height'), 0),
+          clampPositive(style?.height, 0),
+          clampPositive(rect?.height, 0),
+        ].filter(value => Number.isFinite(value) && value > 0)
+
+        const width = candidatesWidth.length ? Math.max(...candidatesWidth) : fallbackWidth
+        const height = candidatesHeight.length ? Math.max(...candidatesHeight) : fallbackHeight
+
+        return {
+          width: clampPositive(width, fallbackWidth),
+          height: clampPositive(height, fallbackHeight),
+        }
+      }
+
+      const buildInlinePlaceholder = (width, height, label = 'Diffy fixture') => {
+        const safeWidth = clampPositive(width, 300)
+        const safeHeight = clampPositive(height, 200)
+        const text = `${safeWidth}×${safeHeight}`
+        const svg = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}">` +
+          `<defs><style>@font-face{font-family:'Inter';src:local('Arial')}</style></defs>` +
+          `<rect width="100%" height="100%" fill="#d8d8d8"/>` +
+          `<line x1="0" y1="0" x2="${safeWidth}" y2="${safeHeight}" stroke="#b0b0b0" stroke-width="2"/>` +
+          `<line x1="${safeWidth}" y1="0" x2="0" y2="${safeHeight}" stroke="#b0b0b0" stroke-width="2"/>` +
+          `<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="'Inter',sans-serif" font-size="${Math.max(12, Math.round(Math.min(safeWidth, safeHeight) / 8))}" fill="#6b6b6b">${text}</text>` +
+          `<title>${label}</title>` +
+          `</svg>`
+
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+      }
+
       if (!Array.isArray(fixtures) || !fixtures.length) {
         return {
           attempts: 0,
@@ -651,94 +713,35 @@ module.exports = {
             } else if (entry.type === 'image') {
               entry.apply = (node) => new Promise((resolve) => {
                 try {
-                  const deriveDimensions = () => {
-                    const width = Math.round(node.naturalWidth || node.width || node.clientWidth || 0)
-                    const height = Math.round(node.naturalHeight || node.height || node.clientHeight || 0)
-                    if (!width || !height) {
-                      return null
-                    }
-                    return { width, height }
-                  }
+                  const { width, height } = deriveBoxDimensions(node)
+                  const placeholderSrc = buildInlinePlaceholder(width, height, 'Diffy image fixture')
+                  const currentSrc = node?.src || ''
 
-                  const swapSource = () => {
-                    const dimensions = deriveDimensions()
-                    const currentSrc = node?.src || null
-                    if (!dimensions || !currentSrc) {
-                      resolve(false)
-                      return
-                    }
-
-                    const targetSrc = `https://picsum.photos/id/0/${dimensions.width}/${dimensions.height}`
-                    if (currentSrc === targetSrc) {
-                      resolve(false)
-                      return
-                    }
-
-                    const cleanup = () => {
-                      node.removeEventListener('load', onLoad)
-                      node.removeEventListener('error', onError)
-                    }
-
-                    const onLoad = () => {
-                      cleanup()
-                      resolve(true)
-                    }
-
-                    const onError = () => {
-                      cleanup()
-                      resolve(false)
-                    }
-
-                    node.addEventListener('load', onLoad, { once: true })
-                    node.addEventListener('error', onError, { once: true })
-
-                    node.src = targetSrc
-
-                    if (node.hasAttribute('data-src')) {
-                      node.setAttribute('data-src', targetSrc)
-                    }
-
-                    if (node.hasAttribute('srcset')) {
-                      node.setAttribute('srcset', `${targetSrc} 1x`)
-                    }
-                  }
-
-                  const initialDims = deriveDimensions()
-                  if (initialDims) {
-                    swapSource()
+                  if (currentSrc === placeholderSrc) {
+                    resolve(false)
                     return
                   }
 
-                  const bootstrap = () => {
-                    node.removeEventListener('load', bootstrap)
-                    node.removeEventListener('error', bootstrap)
-                    const dimensions = deriveDimensions()
-                    if (!dimensions) {
-                      resolve(false)
-                      return
-                    }
-                    swapSource()
+                  node.src = placeholderSrc
+
+                  if (node.hasAttribute('data-src')) {
+                    node.setAttribute('data-src', placeholderSrc)
                   }
 
-                  node.addEventListener('load', bootstrap, { once: true })
-                  node.addEventListener('error', bootstrap, { once: true })
+                  if (node.hasAttribute('srcset')) {
+                    node.setAttribute('srcset', `${placeholderSrc} 1x`)
+                  }
+
+                  try {
+                    node.setAttribute('data-diffy-fixture', 'image')
+                    node.setAttribute('data-diffy-fixture-size', `${width}x${height}`)
+                  } catch (_) {}
 
                   if (typeof node.decode === 'function') {
-                    node.decode().then(() => {
-                      node.removeEventListener('load', bootstrap)
-                      node.removeEventListener('error', bootstrap)
-                      const dimensions = deriveDimensions()
-                      if (!dimensions) {
-                        resolve(false)
-                        return
-                      }
-                      swapSource()
-                    }).catch(() => {
-                      node.removeEventListener('load', bootstrap)
-                      node.removeEventListener('error', bootstrap)
-                      resolve(false)
-                    })
+                    node.decode().catch(() => {})
                   }
+
+                  resolve(true)
                 } catch (_) {
                   resolve(false)
                 }
@@ -746,43 +749,22 @@ module.exports = {
             } else {
               entry.apply = (node) => new Promise((resolve) => {
                 try {
-                  const elStyle = node.currentStyle || window.getComputedStyle(node, false)
-                  const backgroundImageRaw = elStyle.backgroundImage
-                  if (!backgroundImageRaw || backgroundImageRaw === 'none') {
+                  const { width, height } = deriveBoxDimensions(node)
+                  const placeholderSrc = buildInlinePlaceholder(width, height, 'Diffy background fixture')
+                  const currentBackground = node.style.backgroundImage || ''
+
+                  if (currentBackground.includes(placeholderSrc)) {
                     resolve(false)
                     return
                   }
 
-                  const urlMatch = backgroundImageRaw.match(/url\((['\"]?)(.*?)\1\)/i)
-                  const backgroundImage = urlMatch ? urlMatch[2] : backgroundImageRaw
-                  if (!backgroundImage) {
-                    resolve(false)
-                    return
-                  }
+                  node.style.backgroundImage = `url(${placeholderSrc})`
+                  try {
+                    node.setAttribute('data-diffy-fixture', 'background-image')
+                    node.setAttribute('data-diffy-fixture-size', `${width}x${height}`)
+                  } catch (_) {}
 
-                  const original = new Image()
-                  original.addEventListener('load', () => {
-                    const width = Math.round(original.width || 0)
-                    const height = Math.round(original.height || 0)
-                    if (!width || !height) {
-                      resolve(false)
-                      return
-                    }
-                    const newBackgroundImageSrc = `https://picsum.photos/id/0/${width}/${height}`
-                    const replacement = new Image()
-                    replacement.addEventListener('load', () => {
-                      node.style.backgroundImage = `url(${newBackgroundImageSrc})`
-                      resolve(true)
-                    })
-                    replacement.addEventListener('error', () => {
-                      resolve(false)
-                    })
-                    replacement.src = newBackgroundImageSrc
-                  })
-                  original.addEventListener('error', () => {
-                    resolve(false)
-                  })
-                  original.src = backgroundImage
+                  resolve(true)
                 } catch (_) {
                   resolve(false)
                 }
