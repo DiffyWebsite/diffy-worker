@@ -7,7 +7,6 @@ const sharp = require('sharp')
 const fsPromises = require('node:fs/promises')
 
 const CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT = 16384
-const MAX_DEVICE_PIXEL_AREA = 90 * 1000 * 1000 // ~90MP cap to keep captures practical
 const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
 const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
 const IMAGE_STABILITY_TIMEOUT_MS = 5000
@@ -59,9 +58,9 @@ const checkUrl = async (url, job) => {
   }
 
   if (
-    job.hasOwnProperty('basicAuth') && job.basicAuth &&
-    job.basicAuth.hasOwnProperty('user') && job.basicAuth.user &&
-    job.basicAuth.hasOwnProperty('password') && job.basicAuth.password
+      job.hasOwnProperty('basicAuth') && job.basicAuth &&
+      job.basicAuth.hasOwnProperty('user') && job.basicAuth.user &&
+      job.basicAuth.hasOwnProperty('password') && job.basicAuth.password
   ) {
     options.auth = {
       user: job.basicAuth.user,
@@ -206,7 +205,7 @@ const saveError = async (job, jobItem, errorText) => {
   try {
     if (errorText && (errorText.includes('SOCKETTIMEOUT') || errorText.includes('SOCKETTIMEDOUT'))) {
       errorText = 'Diffy was unable to take the screenshot.\n' +
-        'Looks like we have overloaded your server. Please try lowering number of workers for this environment under Project Settings -> Advanced -> Performance'
+          'Looks like we have overloaded your server. Please try lowering number of workers for this environment under Project Settings -> Advanced -> Performance'
     }
 
     errorText = 'Error: ' + errorText
@@ -329,18 +328,18 @@ const waitForVisualStability = async (page, {
   let imagesSettled = false
   try {
     await safeWaitForFunction(
-      page,
-      () => Array.from(document.images || []).every((img) => {
-        if (!img) return true
-        if (!img.complete) return false
-        if (typeof img.naturalWidth === 'number') {
-          return img.naturalWidth > 0
-        }
-        const rect = img.getBoundingClientRect()
-        return rect.width > 0 && rect.height > 0
-      }),
-      { timeout: IMAGE_STABILITY_TIMEOUT_MS },
-      'images.complete wait'
+        page,
+        () => Array.from(document.images || []).every((img) => {
+          if (!img) return true
+          if (!img.complete) return false
+          if (typeof img.naturalWidth === 'number') {
+            return img.naturalWidth > 0
+          }
+          const rect = img.getBoundingClientRect()
+          return rect.width > 0 && rect.height > 0
+        }),
+        { timeout: IMAGE_STABILITY_TIMEOUT_MS },
+        'images.complete wait'
     )
     imagesSettled = true
   } catch (error) {
@@ -392,8 +391,8 @@ const waitForVisualStability = async (page, {
       const buffered = performance.getEntriesByType?.('layout-shift') || []
       if (buffered?.length) {
         const lastBuffered = buffered
-          .filter((entry) => entry && !entry.hadRecentInput)
-          .map((entry) => entry.startTime)
+            .filter((entry) => entry && !entry.hadRecentInput)
+            .map((entry) => entry.startTime)
         if (lastBuffered.length) {
           monitor.lastShiftTs = Math.max(monitor.lastShiftTs, ...lastBuffered, performance.now())
         }
@@ -505,12 +504,10 @@ module.exports = {
       // }
 
       try {
-        const baseMaxPageHeight = (Object.hasOwn(job, 'attempts') && job.attempts > 0)
-          ? (maxPageHeightIfError / job.attempts)
-          : maxPageHeightIfError;
+        const maxPageHeight = (Object.hasOwn(job, 'attempts') && job.attempts > 0) ? (maxPageHeightIfError / job.attempts) : maxPageHeightIfError
 
         const viewportWidth = parseInt(jobItem.breakpoint) || 800;
-        const baseViewport = { width: viewportWidth, height: 1000 };
+        const baseViewport = {width: viewportWidth, height: 1000};
         const headerConfig = func.buildHeaderConfig(jobItem);
 
         const contextOptions = {
@@ -522,57 +519,6 @@ module.exports = {
           locale: headerConfig.locale,
           timezoneId: headerConfig.timezoneId,
           hasTouch: (headerConfig.clientHints?.maxTouchPoints ?? 0) > 1,
-        };
-
-        const contextDeviceScaleFactor = contextOptions.deviceScaleFactor ?? 1;
-        const areaDenominator = Math.max(viewportWidth * Math.max(contextDeviceScaleFactor, 1) * Math.max(contextDeviceScaleFactor, 1), 1);
-        const areaLimitCandidate = Math.floor(MAX_DEVICE_PIXEL_AREA / areaDenominator);
-        const explicitHeightCandidate = Number.parseInt(jobItem?.args?.max_capture_height, 10);
-        const MIN_CAPTURE_HEIGHT = 100;
-
-        const sanitizedAreaLimit = Number.isFinite(areaLimitCandidate) && areaLimitCandidate > 0
-          ? Math.max(areaLimitCandidate, MIN_CAPTURE_HEIGHT)
-          : null;
-        const sanitizedExplicitLimit = Number.isFinite(explicitHeightCandidate) && explicitHeightCandidate > 0
-          ? Math.max(explicitHeightCandidate, MIN_CAPTURE_HEIGHT)
-          : null;
-
-        let effectiveMaxPageHeight = Math.max(baseMaxPageHeight, MIN_CAPTURE_HEIGHT);
-
-        if (sanitizedAreaLimit !== null) {
-          effectiveMaxPageHeight = Math.min(effectiveMaxPageHeight, sanitizedAreaLimit);
-        }
-
-        if (sanitizedExplicitLimit !== null) {
-          effectiveMaxPageHeight = Math.min(effectiveMaxPageHeight, sanitizedExplicitLimit);
-        }
-
-        const captureLimitSources = [];
-        if (sanitizedAreaLimit !== null && sanitizedAreaLimit <= effectiveMaxPageHeight) {
-          captureLimitSources.push('devicePixelArea');
-        }
-        if (sanitizedExplicitLimit !== null && sanitizedExplicitLimit <= effectiveMaxPageHeight) {
-          captureLimitSources.push('max_capture_height');
-        }
-
-        if (effectiveMaxPageHeight < baseMaxPageHeight) {
-          logger.warn('Capture height clamped to avoid oversized screenshot', {
-            requestedHeight: baseMaxPageHeight,
-            effectiveHeight: effectiveMaxPageHeight,
-            areaBasedHeightLimit: sanitizedAreaLimit,
-            viewportWidth,
-            deviceScaleFactor: contextDeviceScaleFactor,
-            explicitHeightLimit: sanitizedExplicitLimit,
-            limitSources: captureLimitSources,
-          });
-        }
-
-        data.captureHeightLimit = effectiveMaxPageHeight;
-        data.captureHeightLimitSources = captureLimitSources;
-        data.captureHeightLimitMeta = {
-          base: baseMaxPageHeight,
-          area: sanitizedAreaLimit,
-          explicit: sanitizedExplicitLimit,
         };
 
         if (
@@ -879,7 +825,7 @@ module.exports = {
           })();
         }
 
-        const initialViewportHeight = await func.updatePageViewport(page, jobItem, effectiveMaxPageHeight)
+        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
         logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
 
         if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
@@ -927,7 +873,7 @@ module.exports = {
           // We need decrease height after cut.
           if (!page.isClosed()) {
             await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 100})
-            await func.updatePageViewport(page, jobItem, effectiveMaxPageHeight)
+            await func.updatePageViewport(page, jobItem, maxPageHeight)
           }
         }
         logger.debug('cutElements done')
@@ -941,7 +887,7 @@ module.exports = {
         // Recalculate page height after modifications.
         if (!page.isClosed()) {
           await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 100})
-          await func.updatePageViewport(page, jobItem, effectiveMaxPageHeight)
+          await func.updatePageViewport(page, jobItem, maxPageHeight)
         }
 
         await func.autoScroll(page, jobItem)
@@ -949,13 +895,13 @@ module.exports = {
 
         const takeoverHeight = await page.evaluate(() => {
           let maxHeight = Math.max(
-            document.documentElement?.scrollHeight || 0,
-            document.body?.scrollHeight || 0,
-            document.documentElement?.offsetHeight || 0,
-            document.body?.offsetHeight || 0,
-            document.documentElement?.clientHeight || 0,
-            document.body?.clientHeight || 0,
-            window.innerHeight || 0,
+              document.documentElement?.scrollHeight || 0,
+              document.body?.scrollHeight || 0,
+              document.documentElement?.offsetHeight || 0,
+              document.body?.offsetHeight || 0,
+              document.documentElement?.clientHeight || 0,
+              document.body?.clientHeight || 0,
+              window.innerHeight || 0,
           )
 
           if (window.visualViewport) {
@@ -978,24 +924,7 @@ module.exports = {
           return Math.max(0, Math.ceil(maxHeight))
         })
 
-        const normalizedHeight = Math.min(takeoverHeight, effectiveMaxPageHeight)
-        const captureHeightWasClamped = Number.isFinite(takeoverHeight) && takeoverHeight > normalizedHeight
-
-        if (captureHeightWasClamped) {
-          logger.warn('Page height exceeded capture limit; truncating output', {
-            takeoverHeight,
-            effectiveMaxPageHeight,
-            normalizedHeight,
-            viewportWidth,
-          })
-        }
-
-        data.captureHeightWasClamped = Boolean(captureHeightWasClamped)
-        data.captureHeightApplied = normalizedHeight
-        if (captureHeightWasClamped) {
-          data.captureHeightOriginal = takeoverHeight
-        }
-
+        const normalizedHeight = Math.min(takeoverHeight, maxPageHeight)
         const pageHeight = await func.updatePageViewport(page, jobItem, normalizedHeight)
 
         data.pageArea = pageHeight * jobItem.breakpoint
@@ -1056,8 +985,8 @@ module.exports = {
           await page.waitForTimeout(50)
 
           const viewportSize = typeof page.viewportSize === 'function'
-            ? page.viewportSize()
-            : baseViewport
+              ? page.viewportSize()
+              : baseViewport
 
           logger.warn(reason, {
             ...extra,
@@ -1092,8 +1021,8 @@ module.exports = {
           ensureOpen(page, 'segmented capture setup')
 
           const cssLimitPerSegment = Math.max(
-            1,
-            Math.floor(CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT / deviceScaleFactor)
+              1,
+              Math.floor(CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT / deviceScaleFactor)
           )
           const normalizedPageHeight = Math.ceil(pageHeight)
           const viewportWidthCss = Number.parseInt(jobItem.breakpoint, 10) || baseViewport.width || 0
@@ -1172,7 +1101,7 @@ module.exports = {
 
           const totalHeightPx = segmentDescriptors.reduce((sum, seg) => sum + seg.heightPx, 0)
           const outputWidthPx = segmentDescriptors.reduce((max, seg) => (
-            seg.widthPx > max ? seg.widthPx : max
+              seg.widthPx > max ? seg.widthPx : max
           ), 0)
 
           if (!outputWidthPx || !Number.isFinite(outputWidthPx)) {
@@ -1194,12 +1123,12 @@ module.exports = {
               background: { r: 0, g: 0, b: 0, alpha: 0 },
             },
           })
-            .composite(composites)
-            .png()
-            .toFile(filename)
+              .composite(composites)
+              .png()
+              .toFile(filename)
 
           await Promise.all(
-            segmentDescriptors.map((seg) => fsPromises.unlink(seg.path).catch(() => {}))
+              segmentDescriptors.map((seg) => fsPromises.unlink(seg.path).catch(() => {}))
           )
         }
 
@@ -1208,8 +1137,8 @@ module.exports = {
             await captureSegmentedScreenshot()
           } catch (segmentedErr) {
             const message = segmentedErr && Object.hasOwn(segmentedErr, 'message')
-              ? segmentedErr.message
-              : String(segmentedErr)
+                ? segmentedErr.message
+                : String(segmentedErr)
 
             logger.warn('Segmented screenshot capture failed; falling back to viewport-only capture.', {
               error: message,
