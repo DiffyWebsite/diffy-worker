@@ -1,4 +1,3 @@
-const request = require('request') // @TODO use node http module
 const uploadS3 = require('./uploadS3.js')
 const thumbnail = require('./thumbnail.js')
 const func = require('./func.js')
@@ -11,8 +10,7 @@ const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
 const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
 const IMAGE_STABILITY_TIMEOUT_MS = 5000
 const FONT_STABILITY_TIMEOUT_MS = 7000
-const NETWORK_IDLE_TIMEOUT_MS = 15000
-const NETWORK_IDLE_QUIET_TIME_MS = 750
+const STABILIZATION_SNIPPET_TIMEOUT_MS = 5000
 
 const sendResult = (job, jobItem, data) => {
   job.status = true
@@ -31,128 +29,6 @@ const sendError = (job, error, jobItem) => {
     job.item_result.additionalType = jobItem.additionalType
   }
   return job
-}
-
-// TODO Add Url checking into the process
-const checkUrl = async (url, job) => {
-  const options = {
-    method: 'HEAD',
-    rejectUnauthorized: false,
-    requestCert: false,
-    strictSSL: false,
-    insecureHTTPParser: true,
-    timeout: 20 * 1000,
-    pool: { maxSockets: Infinity },
-    headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:46.0) Gecko/20100101 Firefox/46.0' },
-  }
-
-  if (func.checkArgs(job, 'headers', true)) {
-    job.args.headers.forEach(item => {
-      if (item.hasOwnProperty('header') && item.header) {
-        if (item.header.toLowerCase() === 'user-agent' && item.hasOwnProperty('value') && item.value.length) {
-          options.headers['user-agent'] = item.value;
-        }
-
-        if (item.header.toLowerCase() === 'x-vercel-protection-bypass') {
-          options.headers['x-vercel-protection-bypass'] = item.value;
-        }
-      }
-    });
-  }
-
-  if (
-      job.hasOwnProperty('basicAuth') && job.basicAuth &&
-      job.basicAuth.hasOwnProperty('user') && job.basicAuth.user &&
-      job.basicAuth.hasOwnProperty('password') && job.basicAuth.password
-  ) {
-    options.auth = {
-      user: job.basicAuth.user,
-      pass: job.basicAuth.password
-    }
-  }
-
-  let lastException;
-
-  try {
-    await checkURLRequest(url, options, job)
-    return true
-  } catch (e) {
-    logger.error('Failed to checkUrl', { url, error: e });
-    lastException = e;
-  }
-
-  try {
-    options.method = 'GET'
-    await checkURLRequest(url, options, job)
-    return true
-  } catch (e) {
-    logger.error('Failed to checkUrl (GET)', { url, error: e });
-    lastException = e;
-  }
-
-  if (job.args.url) {
-    try {
-      await checkURLRequest(job.args.url, options, job)
-      return true
-    } catch (e) {
-      logger.error('Failed to checkUrl (get, auth)', { url: job.args.url, error: e });
-      lastException = e;
-    }
-  }
-
-  throw lastException;
-}
-
-const checkURLRequest = function (url, options, job) {
-  return new Promise((resolve, reject) => {
-    if (func.checkArgs(job, 'cookies')) {
-      let j = request.jar()
-      let cookie = request.cookie(job.args.cookies)
-      j.setCookie(cookie, url)
-      options.jar = j
-    } else {
-      options.jar = true
-    }
-
-    requestLoop(url, options, 2, 1000, (err, res) => {
-      if (err) {
-        return reject(err)
-      }
-
-      if (!res || !res.hasOwnProperty('statusCode')) {
-        return reject('Can\'t resolve GET request')
-      }
-
-      try {
-        if (job.args.auth && job.args.auth.type === 'netlify' && res.statusCode === 401) {
-          return resolve()
-        } else if (res.statusCode === 0 || (res.statusCode >= 400 && !([403, 404].indexOf(res.statusCode) !== -1))) {
-          return reject('Wrong status code => ' + res.statusCode + ': ' + res.statusMessage)
-        }
-
-        return resolve()
-      } catch (e) {
-        return reject('checkUrlError: ' + (e && e.hasOwnProperty('message')) ? e.message : e)
-      }
-    })
-  })
-}
-
-const requestLoop = function (url, options, attemptsLeft, retryDelay, callback, lastError = null) {
-  if (attemptsLeft <= 0) {
-    callback((lastError ?? new Error('checkUrlError')))
-  } else {
-    request(url, options, function (error, response) {
-      const recoverableErrors = ['ESOCKETTIMEDOUT', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED']
-      if (error && recoverableErrors.includes(error.code)) {
-        setTimeout((function () {
-          requestLoop(url, options, --attemptsLeft, retryDelay, callback, error)
-        }), retryDelay)
-      } else {
-        callback(error, response)
-      }
-    })
-  }
 }
 
 const handleIncapsula = async (page, maxRetries = 5) => {
@@ -309,88 +185,55 @@ const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
   return page.addStyleTag(opts)
 }
 
-const waitForNetworkQuiescence = async (page, {
-  timeoutMs = NETWORK_IDLE_TIMEOUT_MS,
-  idleTimeMs = NETWORK_IDLE_QUIET_TIME_MS,
-} = {}) => {
-  ensureOpen(page, 'network-quiescence start')
-
-  const trackedRequests = new Set()
-  let lastActivityTs = Date.now() - idleTimeMs
-
-  const markActivity = () => {
-    lastActivityTs = Date.now()
+const runStabilizationSnippet = async (page, code, { timeoutMs = STABILIZATION_SNIPPET_TIMEOUT_MS } = {}) => {
+  if (!code || !code.toString().trim().length) {
+    return { executed: false }
   }
 
-  const shouldTrack = (request) => {
-    try {
-      if (typeof request.isNavigationRequest === 'function' && request.isNavigationRequest()) {
-        return false
-      }
-    } catch (_) {
-    }
-
-    if (typeof request.resourceType === 'function') {
-      const type = request.resourceType()
-      // Focus on asset-like requests; ignore websockets and preflight noise.
-      return ['document', 'stylesheet', 'image', 'media', 'font', 'script', 'xhr', 'fetch', 'other'].includes(type)
-    }
-
-    return true
-  }
-
-  const handleRequest = (request) => {
-    if (!shouldTrack(request)) {
-      return
-    }
-
-    trackedRequests.add(request)
-    markActivity()
-  }
-
-  const handleRequestDone = (request) => {
-    if (!trackedRequests.has(request)) {
-      return
-    }
-
-    trackedRequests.delete(request)
-    markActivity()
-  }
-
-  page.on('request', handleRequest)
-  page.on('requestfinished', handleRequestDone)
-  page.on('requestfailed', handleRequestDone)
-
-  const cleanup = () => {
-    page.off('request', handleRequest)
-    page.off('requestfinished', handleRequestDone)
-    page.off('requestfailed', handleRequestDone)
-  }
-
-  const startTs = Date.now()
+  ensureOpen(page, 'stabilization snippet start')
 
   try {
-    while ((Date.now() - startTs) < timeoutMs) {
-      ensureOpen(page, 'network-quiescence poll')
+    const result = await safeEval(page, ({ source, timeout }) => {
+      return new Promise((resolve, reject) => {
+        let settled = false
+        const finish = (fn, value) => {
+          if (settled) return
+          settled = true
+          fn(value)
+        }
 
-      const idleFor = Date.now() - lastActivityTs
-      if (!trackedRequests.size && idleFor >= idleTimeMs) {
-        return true
-      }
+        const timer = setTimeout(() => finish(reject, new Error('stabilization script timed out')), timeout)
 
-      const sleepMs = Math.min(Math.max(idleTimeMs / 2, 100), 500)
-      await page.waitForTimeout(sleepMs)
+        try {
+          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+          const executor = new AsyncFunction(source)
+
+          Promise.resolve(executor.call(window))
+              .then((value) => {
+                clearTimeout(timer)
+                finish(resolve, value)
+              })
+              .catch((error) => {
+                clearTimeout(timer)
+                finish(reject, error)
+              })
+        } catch (error) {
+          clearTimeout(timer)
+          finish(reject, error)
+        }
+      })
+    }, { source: code, timeout: timeoutMs }, 'stabilization snippet evaluation')
+
+    return {
+      executed: true,
+      result,
     }
-
-    logger.warn('Network quiescence wait timed out', {
-      timeoutMs,
-      idleTimeMs,
-      pendingRequests: trackedRequests.size,
-    })
-
-    return false
-  } finally {
-    cleanup()
+  } catch (error) {
+    logger.warn('Stabilization snippet failed', { error: error?.message || String(error) })
+    return {
+      executed: false,
+      error: error?.message || String(error),
+    }
   }
 }
 
@@ -470,20 +313,24 @@ const waitForFontFaces = async (page, {
 const waitForVisualStability = async (page, {
   totalTimeoutMs = LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS,
   quietWindowMs = LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS,
+  waitForFonts = false,
 } = {}) => {
   ensureOpen(page, 'visual-stability start')
 
-  let fontsSettled = false
-  try {
-    await safeEval(page, () => {
-      if (!document.fonts || typeof document.fonts.ready?.then !== 'function') {
-        return true
-      }
-      return document.fonts.ready.then(() => true)
-    }, undefined, 'fonts.ready wait')
-    fontsSettled = true
-  } catch (error) {
-    logger.warn('Font readiness wait failed', { error: error?.message || String(error) })
+  let fontsSettled = null
+  if (waitForFonts) {
+    try {
+      await safeEval(page, () => {
+        if (!document.fonts || typeof document.fonts.ready?.then !== 'function') {
+          return true
+        }
+        return document.fonts.ready.then(() => true)
+      }, undefined, 'fonts.ready wait')
+      fontsSettled = true
+    } catch (error) {
+      fontsSettled = false
+      logger.warn('Font readiness wait failed', { error: error?.message || String(error) })
+    }
   }
 
   let imagesSettled = false
@@ -574,7 +421,10 @@ const waitForVisualStability = async (page, {
       logger.warn('Layout shift observer unavailable', { error: initStatus.error })
       layoutSettled = true
     } else {
-      while (Date.now() < endTime) {
+      const maxChecks = Math.max(Math.ceil(totalTimeoutMs / Math.max(quietWindowMs, 100)) + 5, 10)
+      let checks = 0
+
+      while (Date.now() < endTime && checks < maxChecks) {
         const state = await safeEval(page, ({ quietWindow }) => {
           const monitor = window.__diffyLayoutShiftMonitor
           if (!monitor || monitor.unsupported) {
@@ -610,6 +460,15 @@ const waitForVisualStability = async (page, {
         }
 
         await page.waitForTimeout(Math.min(quietMs, 200))
+        checks += 1
+      }
+
+      if (checks >= maxChecks) {
+        logger.warn('Layout stabilization aborted after max checks', {
+          totalTimeoutMs,
+          quietMs,
+          performedChecks: checks,
+        })
       }
     }
   } catch (error) {
@@ -656,13 +515,6 @@ module.exports = {
       let page;
       let jsConsole = [];
       const maxPageHeightIfError = 50000;
-
-      // try {
-      //   await checkUrl(jobItem.url, jobItem)
-      //   logger.info(jobItem.id + ':' + jobItem.breakpoint + ':' + jobItem.url,'check url done')
-      // } catch (e) {
-      //   return await saveError(job, jobItem, 'CheckURL ' + ((e && e, 'message')) ? e.message : e.toString())
-      // }
 
       try {
         const maxPageHeight = (Object.hasOwn(job, 'attempts') && job.attempts > 0) ? (maxPageHeightIfError / job.attempts) : maxPageHeightIfError
@@ -799,15 +651,6 @@ module.exports = {
           });
         }
 
-        if (callRailBlockEnabled) {
-          await page.route('**/*swap_session.json*', (route) => {
-            route.abort().catch((error) => {
-              logger.warn('Failed to abort CallRail request', {error, requestUrl: route.request().url()});
-            });
-          });
-        }
-
-        // Block known-noise third parties (analytics/ads) to reduce flakiness.
         const defaultBlockedHosts = [
           'www.google-analytics.com', 'analytics.google.com', 'ssl.google-analytics.com',
           'www.googletagmanager.com', 'googletagmanager.com', 'www.googletagservices.com',
@@ -817,45 +660,54 @@ module.exports = {
           'widget.intercom.io', 'hs-analytics.net', 'hs-scripts.com', 'googlesyndication.com',
           'doubleclick.net'
         ];
-        await page.route('**/*', (route) => {
+
+        const shouldBlockRequest = (urlString) => {
           try {
-            const host = new URL(route.request().url()).host;
-            if (defaultBlockedHosts.some((h) => host.endsWith(h))) {
-              return route.abort();
+            const parsed = new URL(urlString);
+            if (callRailBlockEnabled && /swap_session\.json/i.test(parsed.pathname)) {
+              return true;
             }
+
+            return defaultBlockedHosts.some((host) => parsed.host.endsWith(host));
           } catch (_) {
+            return false;
           }
-          return route.continue();
-        });
+        };
 
-        if (basicAuthRouteConfig) {
-          await page.route('**', (route) => {
-            const request = route.request();
-            const requestUrl = request.url();
+        await page.route('**/*', (route) => {
+          const request = route.request();
+          const requestUrl = request.url();
 
+          if (shouldBlockRequest(requestUrl)) {
+            route.abort().catch((error) => {
+              logger.warn('Failed to abort blocked request', { error, requestUrl });
+            });
+            return;
+          }
+
+          let continueOptions = null;
+
+          if (basicAuthRouteConfig) {
             const headers = {
               ...request.headers(),
               Authorization: basicAuthRouteConfig.header,
             };
 
             let overriddenUrl = requestUrl;
-            const currentHost = (() => {
-              try {
-                return new URL(overriddenUrl).host;
-              } catch (e) {
-                return null;
+            try {
+              const host = new URL(requestUrl).host;
+              if (host && basicAuthRouteConfig.targetHost && host === basicAuthRouteConfig.targetHost) {
+                overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
               }
-            })();
+            } catch (_) {}
 
-            if (currentHost && basicAuthRouteConfig.targetHost && currentHost === basicAuthRouteConfig.targetHost) {
-              overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
-            }
+            continueOptions = { headers, url: overriddenUrl };
+          }
 
-            route.continue({headers, url: overriddenUrl}).catch((error) => {
-              logger.warn('Failed to continue basic auth request', {error, requestUrl});
-            });
+          route.continue(continueOptions || undefined).catch((error) => {
+            logger.warn('Failed to continue request', { error, requestUrl });
           });
-        }
+        });
 
         // Add new cookies.
         let cookies = await func.addCookies(jobItem)
@@ -983,10 +835,13 @@ module.exports = {
         await func.autoScroll(page, jobItem)
         logger.debug('autoScroll done')
 
+        let stabilizationSnippetResult = null
         if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
-          await (async () => {
-            await eval(jobItem.args.stabilization_code);
-          })();
+          stabilizationSnippetResult = await runStabilizationSnippet(page, jobItem.args.stabilization_code)
+          logger.debug('stabilization snippet executed', {
+            executed: stabilizationSnippetResult?.executed,
+            error: stabilizationSnippetResult?.error,
+          })
         }
 
         const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
@@ -1099,14 +954,6 @@ module.exports = {
           logger.warn('Failed to promote lazy images', { error: error?.message || String(error) })
         }
 
-        let networkSettled = true
-        try {
-          networkSettled = await waitForNetworkQuiescence(page)
-        } catch (error) {
-          networkSettled = false
-          logger.warn('Network quiescence wait failed', { error: error?.message || String(error) })
-        }
-
         const postScrollStability = await waitForVisualStability(page, {
           totalTimeoutMs: Math.max(LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS, 12000),
           quietWindowMs: Math.max(LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS, 400),
@@ -1114,7 +961,6 @@ module.exports = {
         const fontReadyFinal = await waitForFontFaces(page)
 
         logger.debug('post-scroll visual stabilization complete', {
-          networkSettled,
           postScrollStability,
           fontReadyFinal,
         })
