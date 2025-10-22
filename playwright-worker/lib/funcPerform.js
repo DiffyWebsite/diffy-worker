@@ -10,6 +10,9 @@ const CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT = 16384
 const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
 const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
 const IMAGE_STABILITY_TIMEOUT_MS = 5000
+const FONT_STABILITY_TIMEOUT_MS = 7000
+const NETWORK_IDLE_TIMEOUT_MS = 15000
+const NETWORK_IDLE_QUIET_TIME_MS = 750
 
 const sendResult = (job, jobItem, data) => {
   job.status = true
@@ -304,6 +307,164 @@ const safeWaitForFunction = async (page, predicate, options, label = 'waitForFun
 const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
   ensureOpen(page, label)
   return page.addStyleTag(opts)
+}
+
+const waitForNetworkQuiescence = async (page, {
+  timeoutMs = NETWORK_IDLE_TIMEOUT_MS,
+  idleTimeMs = NETWORK_IDLE_QUIET_TIME_MS,
+} = {}) => {
+  ensureOpen(page, 'network-quiescence start')
+
+  const trackedRequests = new Set()
+  let lastActivityTs = Date.now() - idleTimeMs
+
+  const markActivity = () => {
+    lastActivityTs = Date.now()
+  }
+
+  const shouldTrack = (request) => {
+    try {
+      if (typeof request.isNavigationRequest === 'function' && request.isNavigationRequest()) {
+        return false
+      }
+    } catch (_) {
+    }
+
+    if (typeof request.resourceType === 'function') {
+      const type = request.resourceType()
+      // Focus on asset-like requests; ignore websockets and preflight noise.
+      return ['document', 'stylesheet', 'image', 'media', 'font', 'script', 'xhr', 'fetch', 'other'].includes(type)
+    }
+
+    return true
+  }
+
+  const handleRequest = (request) => {
+    if (!shouldTrack(request)) {
+      return
+    }
+
+    trackedRequests.add(request)
+    markActivity()
+  }
+
+  const handleRequestDone = (request) => {
+    if (!trackedRequests.has(request)) {
+      return
+    }
+
+    trackedRequests.delete(request)
+    markActivity()
+  }
+
+  page.on('request', handleRequest)
+  page.on('requestfinished', handleRequestDone)
+  page.on('requestfailed', handleRequestDone)
+
+  const cleanup = () => {
+    page.off('request', handleRequest)
+    page.off('requestfinished', handleRequestDone)
+    page.off('requestfailed', handleRequestDone)
+  }
+
+  const startTs = Date.now()
+
+  try {
+    while ((Date.now() - startTs) < timeoutMs) {
+      ensureOpen(page, 'network-quiescence poll')
+
+      const idleFor = Date.now() - lastActivityTs
+      if (!trackedRequests.size && idleFor >= idleTimeMs) {
+        return true
+      }
+
+      const sleepMs = Math.min(Math.max(idleTimeMs / 2, 100), 500)
+      await page.waitForTimeout(sleepMs)
+    }
+
+    logger.warn('Network quiescence wait timed out', {
+      timeoutMs,
+      idleTimeMs,
+      pendingRequests: trackedRequests.size,
+    })
+
+    return false
+  } finally {
+    cleanup()
+  }
+}
+
+const waitForFontFaces = async (page, {
+  timeoutMs = FONT_STABILITY_TIMEOUT_MS,
+} = {}) => {
+  ensureOpen(page, 'font-stability start')
+
+  try {
+    const result = await safeEval(page, ({ timeout }) => {
+      if (!document.fonts || typeof document.fonts.ready?.then !== 'function') {
+        return { supported: false, status: 'unsupported', pending: [] }
+      }
+
+      const snapshotPending = () => {
+        const pending = []
+        try {
+          document.fonts.forEach((fontFace) => {
+            if (fontFace?.status === 'loading') {
+              pending.push({
+                family: fontFace.family || '',
+                weight: fontFace.weight || '',
+                style: fontFace.style || '',
+              })
+            }
+          })
+        } catch (_) {}
+        return pending
+      }
+
+      return new Promise((resolve) => {
+        let settled = false
+
+        const finish = (status, timedOut = false) => {
+          if (settled) return
+          settled = true
+          resolve({
+            supported: true,
+            status,
+            timedOut,
+            pending: snapshotPending(),
+          })
+        }
+
+        const timer = setTimeout(() => finish(document.fonts.status || 'timeout', true), timeout)
+
+        document.fonts.ready
+          .then(() => {
+            clearTimeout(timer)
+            finish('loaded', false)
+          })
+          .catch(() => {
+            clearTimeout(timer)
+            finish(document.fonts.status || 'error', false)
+          })
+      })
+    }, { timeout: timeoutMs }, 'fonts.ready monitor')
+
+    if (result?.supported && result.pending?.length) {
+      logger.warn('Fonts still pending after readiness wait', {
+        pendingFonts: result.pending.slice(0, 5),
+        pendingCount: result.pending.length,
+      })
+    }
+
+    if (result?.timedOut) {
+      logger.warn('Font readiness timed out', { timeoutMs })
+    }
+
+    return result
+  } catch (error) {
+    logger.warn('Font readiness wait failed', { error: error?.message || String(error) })
+    return { supported: false, status: 'error', error: error?.message || String(error) }
+  }
 }
 
 const waitForVisualStability = async (page, {
@@ -799,6 +960,9 @@ module.exports = {
         const stabilitySummary = await waitForVisualStability(page)
         logger.debug('visual stabilization complete', stabilitySummary)
 
+        const fontReadyInitial = await waitForFontFaces(page)
+        logger.debug('font readiness after initial stabilization', fontReadyInitial)
+
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
         await safeEval(page, () => {
           try {
@@ -892,6 +1056,68 @@ module.exports = {
 
         await func.autoScroll(page, jobItem)
         logger.debug('double autoScroll done')
+
+        try {
+          await safeEval(page, () => {
+            const images = Array.from(document.querySelectorAll('img'))
+            for (const img of images) {
+              try {
+                if (img.loading === 'lazy') {
+                  img.loading = 'eager'
+                }
+                if (img.getAttribute('loading') === 'lazy') {
+                  img.setAttribute('loading', 'eager')
+                }
+
+                if (!img.getAttribute('src')) {
+                  const lazySrc = img.getAttribute('data-src') ||
+                    img.getAttribute('data-lazy-src') ||
+                    img.getAttribute('data-original') ||
+                    img.dataset?.src ||
+                    img.dataset?.original
+
+                  if (lazySrc) {
+                    img.setAttribute('src', lazySrc)
+                  }
+                }
+
+                if (!img.getAttribute('srcset')) {
+                  const lazySrcset = img.getAttribute('data-srcset') ||
+                    img.getAttribute('data-lazy-srcset') ||
+                    img.getAttribute('data-src-set') ||
+                    img.dataset?.srcset
+
+                  if (lazySrcset) {
+                    img.setAttribute('srcset', lazySrcset)
+                  }
+                }
+              } catch (_) {
+              }
+            }
+          }, undefined, 'promote lazy-loaded images')
+        } catch (error) {
+          logger.warn('Failed to promote lazy images', { error: error?.message || String(error) })
+        }
+
+        let networkSettled = true
+        try {
+          networkSettled = await waitForNetworkQuiescence(page)
+        } catch (error) {
+          networkSettled = false
+          logger.warn('Network quiescence wait failed', { error: error?.message || String(error) })
+        }
+
+        const postScrollStability = await waitForVisualStability(page, {
+          totalTimeoutMs: Math.max(LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS, 12000),
+          quietWindowMs: Math.max(LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS, 400),
+        })
+        const fontReadyFinal = await waitForFontFaces(page)
+
+        logger.debug('post-scroll visual stabilization complete', {
+          networkSettled,
+          postScrollStability,
+          fontReadyFinal,
+        })
 
         const takeoverHeight = await page.evaluate(() => {
           let maxHeight = Math.max(
