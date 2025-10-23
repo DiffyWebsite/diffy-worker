@@ -203,6 +203,40 @@ const coerceTimeoutMs = (value, fallback) => {
   return numeric
 }
 
+const isTimeoutError = (error) => {
+  if (!error) {
+    return false
+  }
+
+  if (error.name === 'TimeoutError') {
+    return true
+  }
+
+  const message = (error && Object.hasOwn(error, 'message')) ? error.message : String(error)
+  return /Timeout\s+\d+ms\s+exceeded/i.test(message)
+}
+
+const screenshotWithAdaptiveTimeout = async (page, options, label, logContext = {}) => {
+  ensureOpen(page, label)
+
+  try {
+    return await page.screenshot(options)
+  } catch (err) {
+    if (!isTimeoutError(err) || options.timeout === undefined || options.timeout === 0) {
+      throw err
+    }
+
+    logger.warn(`${label} timed out; retrying without capture timeout`, {
+      ...logContext,
+      timeoutMs: options.timeout,
+    })
+
+    ensureOpen(page, `${label} retry`)
+    const retryOptions = { ...options, timeout: 0 }
+    return page.screenshot(retryOptions)
+  }
+}
+
 const safeEval = async (page, fn, arg, label = 'evaluate') => {
   ensureOpen(page, label)
   return page.evaluate(fn, arg)
@@ -1120,7 +1154,15 @@ module.exports = {
             viewportScreenshotOptions.animations = animationsSetting
           }
 
-          await page.screenshot(viewportScreenshotOptions)
+          await screenshotWithAdaptiveTimeout(
+              page,
+              viewportScreenshotOptions,
+              'viewport-only screenshot',
+              {
+                ...extra,
+                reason,
+              }
+          )
 
           if (viewportSize?.width && viewportSize?.height) {
             data.pageArea = viewportSize.width * viewportSize.height
@@ -1194,7 +1236,15 @@ module.exports = {
               segmentScreenshotOptions.animations = animationsSetting
             }
 
-            await page.screenshot(segmentScreenshotOptions)
+            await screenshotWithAdaptiveTimeout(
+                page,
+                segmentScreenshotOptions,
+                `segmented capture part ${partIndex}`,
+                {
+                  partIndex,
+                  clip,
+                }
+            )
 
             const metadata = await sharp(partPath).metadata()
             if (!metadata?.height || !metadata?.width) {
@@ -1285,7 +1335,16 @@ module.exports = {
               screenshotOptions.animations = animationsSetting
             }
 
-            await page.screenshot(screenshotOptions)
+            await screenshotWithAdaptiveTimeout(
+                page,
+                screenshotOptions,
+                'full-page screenshot',
+                {
+                  pageHeight,
+                  deviceScaleFactor,
+                  timeoutMs: screenshotTimeoutMs,
+                }
+            )
           } catch (err) {
             const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
             const hitHeightLimit = /Unable to capture screenshot/i.test(message)
