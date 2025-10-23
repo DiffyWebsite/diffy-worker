@@ -6,6 +6,7 @@ const sharp = require('sharp')
 const fsPromises = require('node:fs/promises')
 
 const CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT = 16384
+const DEFAULT_SCREENSHOT_TIMEOUT_MS = 120000
 const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
 const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
 const IMAGE_STABILITY_TIMEOUT_MS = 5000
@@ -168,6 +169,38 @@ const ensureOpen = (page, label = 'operation') => {
   if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
     throw new Error(`Page closed before ${label}`)
   }
+}
+
+const coerceTimeoutMs = (value, fallback) => {
+  if (value === undefined || value === null) {
+    return fallback
+  }
+
+  let numeric = value
+
+  if (typeof numeric === 'string') {
+    const trimmed = numeric.trim()
+    if (!trimmed.length) {
+      return fallback
+    }
+
+    numeric = Number.parseFloat(trimmed)
+  }
+
+  if (typeof numeric !== 'number' || !Number.isFinite(numeric) || numeric < 0) {
+    return fallback
+  }
+
+  if (numeric === 0) {
+    return 0
+  }
+
+  // Treat small values as seconds to remain backward compatible with existing configs.
+  if (numeric > 0 && numeric < 1000) {
+    return numeric * 1000
+  }
+
+  return numeric
 }
 
 const safeEval = async (page, fn, arg, label = 'evaluate') => {
@@ -1042,6 +1075,15 @@ module.exports = {
         if (page.isClosed()) throw new Error('Page closed before capture')
 
         const animationsSetting = jobItem?.args?.stabilization ? 'disabled' : undefined
+        const screenshotTimeoutEnvValue =
+            process.env.PLAYWRIGHT_SCREENSHOT_TIMEOUT_MS ??
+            process.env.PLAYWRIGHT_SCREENSHOT_TIMEOUT ??
+            process.env.SCREENSHOT_TIMEOUT_MS ??
+            process.env.SCREENSHOT_TIMEOUT
+        const screenshotTimeoutMs = coerceTimeoutMs(
+            screenshotTimeoutEnvValue,
+            DEFAULT_SCREENSHOT_TIMEOUT_MS
+        )
 
         const captureViewportOnly = async (reason, extra = {}) => {
           ensureOpen(page, 'viewport-only capture')
@@ -1071,6 +1113,7 @@ module.exports = {
             path: filename,
             fullPage: false,
             omitBackground: false,
+            timeout: screenshotTimeoutMs,
           }
 
           if (animationsSetting) {
@@ -1144,6 +1187,7 @@ module.exports = {
               path: partPath,
               clip,
               omitBackground: false,
+              timeout: screenshotTimeoutMs,
             }
 
             if (animationsSetting) {
@@ -1234,6 +1278,7 @@ module.exports = {
               path: filename,
               fullPage: true,
               omitBackground: false,
+              timeout: screenshotTimeoutMs,
             }
 
             if (animationsSetting) {
