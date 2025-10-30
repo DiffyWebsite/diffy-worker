@@ -1097,17 +1097,59 @@ module.exports = {
         return manager
       }
 
+      const isHiddenByAttrs = (element) => {
+        let current = element
+        while (current && current.nodeType === Node.ELEMENT_NODE) {
+          if (current.hasAttribute?.('hidden') || current.hasAttribute?.('inert')) {
+            return true
+          }
+          const ariaHidden = current.getAttribute?.('aria-hidden')
+          if (ariaHidden && ariaHidden !== 'false') {
+            return true
+          }
+          current = current.parentElement
+        }
+        return false
+      }
+
+      const intersectsViewport = (rect) => {
+        const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0
+        const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0
+        if (!viewportWidth || !viewportHeight) {
+          return true
+        }
+        return !(
+          rect.bottom <= 0 ||
+          rect.right <= 0 ||
+          rect.top >= viewportHeight ||
+          rect.left >= viewportWidth
+        )
+      }
+
       const isVisible = (element) => {
-        if (!element) {
+        if (!element || isHiddenByAttrs(element)) {
           return false
         }
+
         const style = window.getComputedStyle(element)
-        return (
-          style.display !== 'none' &&
-          style.visibility !== 'hidden' &&
-          parseFloat(style.opacity || '1') > 0 &&
-          (element.offsetWidth > 0 || element.offsetHeight > 0)
-        )
+        if (
+          style.display === 'none' ||
+          style.visibility === 'hidden' ||
+          parseFloat(style.opacity || '1') <= 0
+        ) {
+          return false
+        }
+
+        if (element.offsetParent === null && style.position !== 'fixed') {
+          return false
+        }
+
+        const rect = element.getBoundingClientRect()
+        if (!rect || rect.width <= 0 || rect.height <= 0 || !intersectsViewport(rect)) {
+          return false
+        }
+
+        return (element.offsetWidth > 0 || element.offsetHeight > 0 || element.getClientRects().length > 0)
       }
 
       const manager = ensureMaskManager()
