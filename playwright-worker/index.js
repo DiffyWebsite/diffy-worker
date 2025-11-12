@@ -12,7 +12,7 @@ const debug = !!process.env.DEBUG;
 const { performance } = require('perf_hooks')
 const { Executor } = require('./lib/executor')
 const logger = require('./lib/logger')
-const { ChromiumBrowser } = require('./lib/chromiumBrowser')
+const { WebkitBrowser } = require('./lib/webkitBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
 
 const argv = require('minimist')(process.argv.slice(2));
@@ -100,7 +100,7 @@ process.on('unhandledRejection', (reason, p) => {
   let results = []
   let handlerTimeExecuteStart = performance.now();
   const executor = new Executor(debug, local);
-  const chromiumBrowser = new ChromiumBrowser(debug, local)
+  const webkitBrowser = new WebkitBrowser(debug, local)
 
   let shutdownTimeout = null;
   let shutdownDeadlineTs = handlerTimeExecuteStart + DEFAULT_TIMEOUT_MS;
@@ -177,7 +177,7 @@ process.on('unhandledRejection', (reason, p) => {
     const baseHandler = Math.max(DEFAULT_TIMEOUT_MS, 5 * 60 * 1000 + extraBufferMs);
 
     scheduleShutdown(baseHandler);
-    browser = await chromiumBrowser.getBrowser(proxy)
+    browser = await webkitBrowser.getBrowser(proxy)
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
@@ -195,7 +195,7 @@ process.on('unhandledRejection', (reason, p) => {
       clearTimeout(shutdownTimeout)
     }
     await closeBrowser(browser)
-    await chromiumBrowser.closeProxy()
+    await webkitBrowser.closeProxy()
 
     logger.error('Failed to run executor', {
       errorMessage: err?.message || 'Unknown error',
@@ -207,7 +207,7 @@ process.on('unhandledRejection', (reason, p) => {
 
   clearTimeout(shutdownTimeout)
   await closeBrowser(browser)
-  await chromiumBrowser.closeProxy();
+  await webkitBrowser.closeProxy();
 
   if (isSqs && message) {
     await sqsSender.deleteSQSMessage(message);

@@ -1,7 +1,6 @@
-const fs = require('fs');
 const crypto = require('crypto');
 const { anonymizeProxy, closeAnonymizedProxy } = require('proxy-chain');
-const { chromium } = require('playwright');
+const { webkit } = require('playwright');
 const logger = require('./logger');
 
 const randomBetween = (min, max) => crypto.randomInt(min, max + 1);
@@ -16,58 +15,37 @@ const realisticViewports = [
 
 const createLaunchProfile = () => {
   const viewport = realisticViewports[randomBetween(0, realisticViewports.length - 1)];
-  const args = [`--window-size=${viewport.width},${viewport.height}`];
-  return { viewport, args };
+  return { viewport };
 };
 
-class ChromiumBrowser {
+class WebkitBrowser {
   constructor(debug = false, local = false) {
     this.debug = debug;
     this.local = local;
     this.browser = null;
     this.anonymizedProxy = null;
-    this.staticArgs = [
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
-    ];
     this.launchProfile = createLaunchProfile();
-    this.localExecutivePath = '/usr/bin/chromium-browser';
   }
 
   async getBrowser(proxy) {
     this.launchProfile = createLaunchProfile();
 
-    const launchArgs = Array.from(new Set([...this.staticArgs, ...this.launchProfile.args]));
-
     const launchOptions = {
-      args: launchArgs,
       headless: true,
-      chromiumSandbox: this.local,
       timeout: 120000,
     };
 
     if (proxy) {
       this.anonymizedProxy = await anonymizeProxy(proxy);
-      launchArgs.push(`--proxy-server=${this.anonymizedProxy}`);
+      launchOptions.proxy = { server: this.anonymizedProxy };
     }
 
-    let executablePath = this.localExecutivePath;
+    if (this.debug) logger.debug('Launching WebKit with options', { launchOptions });
 
-    if (executablePath) {
-      launchOptions.executablePath = executablePath;
-    }
-
-    if (this.debug) logger.debug('Launching Chromium with options', { launchOptions });
-
-    this.browser = await chromium.launch(launchOptions);
+    this.browser = await webkit.launch(launchOptions);
     return this.browser;
   }
 
-  /**
-   * Create a fresh context with the chosen viewport and sensible defaults.
-   */
   async newContext(options = {}) {
     if (!this.browser) throw new Error('Browser not launched. Call getBrowser() first.');
     const ctx = await this.browser.newContext({
@@ -78,8 +56,6 @@ class ChromiumBrowser {
       locale: 'en-US',
       ...options,
     });
-    // Apply sane default timeouts so actions and navigations are bounded.
-    // Keep these internal (no exposure via job args as requested).
     ctx.setDefaultTimeout(30000);
     ctx.setDefaultNavigationTimeout(45000);
     return ctx;
@@ -98,4 +74,5 @@ class ChromiumBrowser {
   }
 }
 
-module.exports = { ChromiumBrowser }
+module.exports = { WebkitBrowser }
+
