@@ -1429,9 +1429,15 @@ module.exports = {
   },
 
   getPageMhtml: async (page) => {
-    const cdp = await page.context().newCDPSession(page);
-    const { data } = await cdp.send('Page.captureSnapshot', { format: 'mhtml' });
-    return data;
+    try {
+      const cdp = await page.context().newCDPSession(page);
+      const { data } = await cdp.send('Page.captureSnapshot', { format: 'mhtml' });
+      return data;
+    } catch (err) {
+      // WebKit and Firefox do not support CDP. Fallback to empty string.
+      logger.warn('MHTML capture not supported; skipping', { error: (err && err.message) ? err.message : String(err) })
+      return '';
+    }
   },
 
   getImageSize: async (file) => {

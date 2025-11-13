@@ -1096,7 +1096,17 @@ module.exports = {
 
         let mhtmlFilename = '';
         if (Object.hasOwn(jobItem, 'mhtml') && jobItem.mhtml) {
-          mhtmlFilename = '/tmp/mhtml-' + filenameKey + '.mhtml'
+          try {
+            const bt = page.context()?.browser()?.browserType?.()
+            const name = typeof bt?.name === 'function' ? bt.name() : null
+            if (name === 'chromium') {
+              mhtmlFilename = '/tmp/mhtml-' + filenameKey + '.mhtml'
+            } else {
+              logger.info('MHTML requested but unsupported by browser; skipping')
+            }
+          } catch (_) {
+            logger.info('MHTML requested; browser type unknown; skipping')
+          }
         }
 
         const jsConsoleFilename = '/tmp/jsConsole-' + filenameKey + '.json'
