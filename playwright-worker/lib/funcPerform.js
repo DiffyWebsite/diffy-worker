@@ -797,22 +797,22 @@ module.exports = {
           await context.addCookies(cookies)
         }
 
-        try {
-          const origin = new URL(url).origin
-          const allPerms = ['geolocation', 'clipboard-read', 'clipboard-write', 'notifications', 'camera', 'microphone']
-          // First try full set with origin
-          await context.grantPermissions(allPerms, { origin })
-        } catch (firstErr) {
-          // Retry with a subset commonly supported by WebKit, still scoping to origin
+        // Only attempt permission grants when explicitly requested in job args.
+        const requestedPerms = (() => {
+          const arg = jobItem?.args?.grant_permissions
+          if (!arg) return null
+          if (Array.isArray(arg)) return arg
+          if (arg === true) return ['geolocation', 'notifications', 'camera', 'microphone']
+          return null
+        })()
+
+        if (requestedPerms && requestedPerms.length) {
           try {
             const origin = new URL(url).origin
-            const wkSubset = ['geolocation', 'notifications', 'camera', 'microphone']
-            await context.grantPermissions(wkSubset, { origin })
-          } catch (secondErr) {
-            // Final fallback: grant subset without origin scoping
+            await context.grantPermissions(requestedPerms, { origin })
+          } catch (firstErr) {
             try {
-              const wkSubset = ['geolocation', 'notifications', 'camera', 'microphone']
-              await context.grantPermissions(wkSubset)
+              await context.grantPermissions(requestedPerms)
             } catch (finalErr) {
               logger.warn('Failed to grant permissions (ignored)', { error: finalErr })
             }
