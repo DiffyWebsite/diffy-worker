@@ -799,9 +799,24 @@ module.exports = {
 
         try {
           const origin = new URL(url).origin
-          await context.grantPermissions(['geolocation', 'clipboard-read', 'clipboard-write', 'notifications', 'camera', 'microphone'], {origin})
-        } catch (error) {
-          logger.warn('Failed to grant permissions for origin', {error})
+          const allPerms = ['geolocation', 'clipboard-read', 'clipboard-write', 'notifications', 'camera', 'microphone']
+          // First try full set with origin
+          await context.grantPermissions(allPerms, { origin })
+        } catch (firstErr) {
+          // Retry with a subset commonly supported by WebKit, still scoping to origin
+          try {
+            const origin = new URL(url).origin
+            const wkSubset = ['geolocation', 'notifications', 'camera', 'microphone']
+            await context.grantPermissions(wkSubset, { origin })
+          } catch (secondErr) {
+            // Final fallback: grant subset without origin scoping
+            try {
+              const wkSubset = ['geolocation', 'notifications', 'camera', 'microphone']
+              await context.grantPermissions(wkSubset)
+            } catch (finalErr) {
+              logger.warn('Failed to grant permissions (ignored)', { error: finalErr })
+            }
+          }
         }
 
         let response;
