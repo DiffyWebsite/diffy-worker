@@ -37,25 +37,23 @@ const ensurePageOpen = (page, label = 'operation') => {
 }
 
 const PRIMARY_BROWSER_PROFILE = {
-  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.85 Safari/537.36',
+  // Default to macOS Safari-like UA for WebKit runs.
+  userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${process.env.PLAYWRIGHT_SAFARI_VERSION || '18.0'} Safari/605.1.15`,
   locale: 'en-US',
   languages: ['en-US', 'en'],
   timezoneId: 'America/New_York',
-  platform: 'Windows',
-  hardwareConcurrency: 12,
+  platform: 'macOS',
+  hardwareConcurrency: 8,
   deviceMemory: 8,
-  devicePixelRatio: 1.25,
-  brands: [
-    { brand: 'Not_A Brand', version: '8' },
-    { brand: 'Chromium', version: '131' },
-    { brand: 'Google Chrome', version: '131' }
-  ],
-  platformVersion: '15.0.0',
+  devicePixelRatio: 2,
+  // Safari does not send Chromium client hints brands; keep null to signal skip.
+  brands: null,
+  platformVersion: '14.0.0',
   architecture: 'x86',
   bitness: '64',
   maxTouchPoints: 1,
-  webglVendor: 'Google Inc. (NVIDIA)',
-  webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Ti Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)'
+  webglVendor: undefined,
+  webglRenderer: undefined,
 }
 
 const buildAcceptLanguageHeader = (languages = DEFAULT_LANGUAGES) => {
@@ -322,17 +320,19 @@ const buildHeaderConfig = (job) => {
   ensureHeader(headers, 'Accept-Language', buildAcceptLanguageHeader(['en-US','en']))
   ensureHeader(headers, 'Upgrade-Insecure-Requests', '1')
 
-  // Build consistent Client Hints: fixed platform/versions derived from locked profile
-  const clientHints = buildClientHintMetadata(userAgentString, {
-    ...profile,
-    locale: 'en-US',
-    languages: ['en-US','en'],
-    timezoneId: 'UTC',
-  })
-  const clientHintHeaders = buildClientHintHeaders(clientHints)
-  Object.entries(clientHintHeaders)
-    .filter(([, value]) => value !== undefined)
-    .forEach(([name, value]) => ensureHeader(headers, name, value))
+  // Build Client Hints only for Chromium-style UAs. Safari does not send them.
+  if (/Chrome\//.test(userAgentString)) {
+    const clientHints = buildClientHintMetadata(userAgentString, {
+      ...profile,
+      locale: 'en-US',
+      languages: ['en-US','en'],
+      timezoneId: 'UTC',
+    })
+    const clientHintHeaders = buildClientHintHeaders(clientHints)
+    Object.entries(clientHintHeaders)
+      .filter(([, value]) => value !== undefined)
+      .forEach(([name, value]) => ensureHeader(headers, name, value))
+  }
 
   if (job.url && job.url.includes('pantheonsite.io')) {
     headers['Deterrence-Bypass'] = '1'
@@ -342,7 +342,7 @@ const buildHeaderConfig = (job) => {
   return {
     userAgent: userAgentString,
     extraHeaders: headers,
-    clientHints,
+    clientHints: undefined,
     locale: 'en-US',
     languages: ['en-US','en'],
     timezoneId: 'UTC',

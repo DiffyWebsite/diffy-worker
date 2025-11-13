@@ -27,12 +27,23 @@ class WebkitBrowser {
     this.launchProfile = createLaunchProfile();
   }
 
+  // Build a macOS Safari-like user agent.
+  // PLAYWRIGHT_SAFARI_VERSION overrides version token if needed.
+  // Note: This mimics Safari UA; it does not enable Safari-specific features.
+  buildSafariUA () {
+    const safariVersion = process.env.PLAYWRIGHT_SAFARI_VERSION || '18.0';
+    // macOS Safari UA (Sonoma/Sequoia era)
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${safariVersion} Safari/605.1.15`;
+  }
+
   async getBrowser(proxy) {
     this.launchProfile = createLaunchProfile();
 
     const launchOptions = {
       headless: true,
       timeout: 120000,
+      // Keep launch args minimal and stable for deterministic rendering.
+      // WebKit in headless mode uses software rendering; GPU flags are not exposed like Chromium.
     };
 
     if (proxy) {
@@ -48,14 +59,21 @@ class WebkitBrowser {
 
   async newContext(options = {}) {
     if (!this.browser) throw new Error('Browser not launched. Call getBrowser() first.');
+    const defaultDpr = 2; // mimic Retina on macOS
     const ctx = await this.browser.newContext({
       viewport: this.launchProfile.viewport,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: options.deviceScaleFactor || defaultDpr,
       ignoreHTTPSErrors: true,
-      timezoneId: 'Europe/Chisinau',
-      locale: 'en-US',
+      timezoneId: options.timezoneId || 'Europe/Chisinau',
+      locale: options.locale || 'en-US',
+      userAgent: options.userAgent || this.buildSafariUA(),
+      isMobile: options.isMobile ?? false,
+      hasTouch: options.hasTouch ?? false,
+      colorScheme: options.colorScheme || 'light',
+      reducedMotion: options.reducedMotion || 'no-preference',
       ...options,
     });
+    // No font injection to avoid altering site font choices.
     ctx.setDefaultTimeout(30000);
     ctx.setDefaultNavigationTimeout(45000);
     return ctx;
@@ -75,4 +93,3 @@ class WebkitBrowser {
 }
 
 module.exports = { WebkitBrowser }
-
