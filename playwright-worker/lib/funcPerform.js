@@ -716,6 +716,39 @@ module.exports = {
                 Object.defineProperty(window.screen, 'pixelDepth', { get: () => 24, configurable: true });
               } catch (_) {}
 
+              // Device pixel ratio and outer/inner metrics parity
+              try {
+                Object.defineProperty(window, 'devicePixelRatio', { get: () => 2, configurable: true });
+                const approxChromeHeight = 80; // approximate Safari chrome height
+                Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth, configurable: true });
+                Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + approxChromeHeight, configurable: true });
+              } catch (_) {}
+
+              // Pointer/hover media features for desktop Safari
+              try {
+                const origMatch2 = window.matchMedia;
+                if (typeof origMatch2 === 'function') {
+                  window.matchMedia = function(q){
+                    try {
+                      const query = String(q || '').toLowerCase();
+                      if (/(^|\s)\(\s*hover\s*:\s*hover\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                      if (/(^|\s)\(\s*any-hover\s*:\s*hover\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                      if (/(^|\s)\(\s*pointer\s*:\s*fine\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                      if (/(^|\s)\(\s*any-pointer\s*:\s*fine\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                    } catch (_) {}
+                    return origMatch2.apply(this, arguments);
+                  };
+                }
+              } catch (_) {}
+
               // Media codec support similar to Safari (no WebM by default; H.264 AAC popular)
               try {
                 const patchCanPlay = (proto) => {
@@ -1069,6 +1102,12 @@ module.exports = {
             ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
             ::-webkit-scrollbar-track { background: transparent !important; }
             ::-webkit-scrollbar-thumb { background: transparent !important; }
+
+            /* Prefer Safari system font stack aggressively */
+            html, body, button, input, select, textarea {
+              font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+              -webkit-text-size-adjust: 100%;
+            }
           `
         }).catch((e) => logger.warn('Failed to add style tag to disable animation', {error: e}))
 
