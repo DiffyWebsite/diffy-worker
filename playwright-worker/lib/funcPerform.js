@@ -617,7 +617,7 @@ module.exports = {
 
         context = await browser.newContext(contextOptions);
 
-        // Adjust navigator properties to resemble Safari on macOS.
+        // Adjust navigator properties and feature shims to resemble Safari on macOS as closely as practical.
         try {
           await context.addInitScript(({ languages }) => {
             try {
@@ -640,6 +640,90 @@ module.exports = {
 
               // Keep webdriver falsy for parity.
               try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true }); } catch (_) {}
+
+              // Safari does not expose window.chrome
+              try {
+                Object.defineProperty(window, 'chrome', { get: () => undefined, configurable: true });
+              } catch (_) {}
+
+              // Minimal PluginArray/MimeTypeArray to resemble Safari (often empty arrays on desktop).
+              try {
+                const makeArrayLike = (name) => {
+                  const arr = [];
+                  Object.defineProperty(arr, 'item', { value: (i) => arr[i] || null, configurable: true });
+                  Object.defineProperty(arr, 'namedItem', { value: () => null, configurable: true });
+                  Object.defineProperty(arr, 'refresh', { value: () => {}, configurable: true });
+                  Object.defineProperty(arr, 'toString', { value: () => `[object ${name}]`, configurable: true });
+                  return arr;
+                };
+                const plugins = makeArrayLike('PluginArray');
+                const mimeTypes = makeArrayLike('MimeTypeArray');
+                defineRO(navigator, 'plugins', plugins);
+                defineRO(navigator, 'mimeTypes', mimeTypes);
+              } catch (_) {}
+
+              // WebGL renderer/vendor hints similar to Safari
+              const spoofWebGL = (proto) => {
+                if (!proto || typeof proto.getParameter !== 'function') return;
+                const original = proto.getParameter;
+                proto.getParameter = function(param){
+                  try {
+                    // WEBGL_debug_renderer_info constants
+                    if (param === 0x9245 /* UNMASKED_VENDOR_WEBGL */) return 'Apple Inc.';
+                    if (param === 0x9246 /* UNMASKED_RENDERER_WEBGL */) return 'Apple GPU';
+                  } catch (_) {}
+                  return original.call(this, param);
+                };
+              };
+              try { spoofWebGL(WebGLRenderingContext?.prototype); } catch (_) {}
+              try { spoofWebGL(WebGL2RenderingContext?.prototype); } catch (_) {}
+
+              // Media feature shims: color-gamut, prefers-contrast, forced-colors, inverted-colors
+              try {
+                const origMatch = window.matchMedia;
+                if (typeof origMatch === 'function') {
+                  window.matchMedia = function(q){
+                    try {
+                      const query = String(q || '').toLowerCase();
+                      if (/(^|\s)\(\s*color-gamut\s*:\s*srgb\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                      if (/(^|\s)\(\s*prefers-contrast\s*:\s*no-preference\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                      if (/(^|\s)\(\s*forced-colors\s*:\s*none\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                      if (/(^|\s)\(\s*inverted-colors\s*:\s*none\s*\)/.test(query)) {
+                        return { matches: true, media: q, onchange: null, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){}, dispatchEvent(){ return false; } };
+                      }
+                    } catch (_) {}
+                    return origMatch.apply(this, arguments);
+                  };
+                }
+              } catch (_) {}
+
+              // Media codec support similar to Safari (no WebM by default; H.264 AAC popular)
+              try {
+                const patchCanPlay = (proto) => {
+                  if (!proto || typeof proto.canPlayType !== 'function') return;
+                  const original = proto.canPlayType;
+                  proto.canPlayType = function(type){
+                    try {
+                      const t = String(type || '').toLowerCase();
+                      if (t.includes('webm')) return '';
+                      if (t.includes('video/mp4') && (t.includes('avc1') || t.includes('h264'))) return 'probably';
+                      if (t.includes('audio/mp4') || t.includes('mp4a')) return 'probably';
+                    } catch (_) {}
+                    return original.call(this, type);
+                  };
+                };
+                patchCanPlay(HTMLVideoElement?.prototype);
+                patchCanPlay(HTMLAudioElement?.prototype);
+              } catch (_) {}
+
+              // APIs not present in Safari desktop
+              try { navigator.getBattery && delete navigator.getBattery; } catch (_) {}
             } catch (_) {}
           }, { languages: headerConfig.languages || ['en-US','en'] });
         } catch (e) {
@@ -649,7 +733,10 @@ module.exports = {
         page = await context.newPage();
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
-          await page.emulateMedia({colorScheme: 'dark'});
+          await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
+        } else {
+          // Default to light scheme and no reduced motion to match typical Safari desktop defaults.
+          await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
         }
 
         logger.debug('browser.newContext', {jobItem})
