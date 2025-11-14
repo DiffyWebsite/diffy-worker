@@ -592,12 +592,13 @@ module.exports = {
 
         // This worker runs WebKit only; mirror desktop Safari defaults.
 
+        const wantsRetina = !(Object.hasOwn(jobItem.args || {}, 'retina_images') && jobItem.args.retina_images === false)
         const contextOptions = {
           viewport: baseViewport,
           bypassCSP: true,
           ignoreHTTPSErrors: true,
           userAgent: headerConfig.userAgent,
-          deviceScaleFactor: 2,
+          deviceScaleFactor: wantsRetina ? 2 : 1,
           locale: headerConfig.locale,
           timezoneId: headerConfig.timezoneId,
           hasTouch: false,
