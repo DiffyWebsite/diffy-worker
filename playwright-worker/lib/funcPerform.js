@@ -590,15 +590,18 @@ module.exports = {
         const baseViewport = {width: viewportWidth, height: 1000};
         const headerConfig = func.buildHeaderConfig(jobItem);
 
+        // This worker runs WebKit only; mirror desktop Safari defaults.
+
         const contextOptions = {
           viewport: baseViewport,
           bypassCSP: true,
           ignoreHTTPSErrors: true,
           userAgent: headerConfig.userAgent,
-          deviceScaleFactor: (Object.hasOwn(jobItem.args, 'retina_images') && jobItem.args.retina_images) ? 2 : 1,
+          deviceScaleFactor: 2,
           locale: headerConfig.locale,
           timezoneId: headerConfig.timezoneId,
-          hasTouch: (headerConfig.clientHints?.maxTouchPoints ?? 0) > 1,
+          hasTouch: false,
+          isMobile: false,
         };
 
         if (
@@ -613,6 +616,35 @@ module.exports = {
         }
 
         context = await browser.newContext(contextOptions);
+
+        // Adjust navigator properties to resemble Safari on macOS.
+        try {
+          await context.addInitScript(({ languages }) => {
+            try {
+              const defineRO = (obj, prop, value) => {
+                try {
+                  Object.defineProperty(obj, prop, { get: () => value, configurable: true });
+                } catch (_) {}
+              };
+
+              defineRO(navigator, 'platform', 'MacIntel');
+              defineRO(navigator, 'vendor', 'Apple Computer, Inc.');
+              defineRO(navigator, 'maxTouchPoints', 1);
+              defineRO(navigator, 'hardwareConcurrency', 8);
+              defineRO(navigator, 'language', languages && languages[0] ? languages[0] : 'en-US');
+              defineRO(navigator, 'languages', Array.isArray(languages) && languages.length ? languages : ['en-US','en']);
+              try {
+                // Safari currently has no UA-CH; ensure userAgentData is undefined.
+                Object.defineProperty(navigator, 'userAgentData', { get: () => undefined, configurable: true });
+              } catch (_) {}
+
+              // Keep webdriver falsy for parity.
+              try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true }); } catch (_) {}
+            } catch (_) {}
+          }, { languages: headerConfig.languages || ['en-US','en'] });
+        } catch (e) {
+          logger.warn('Failed to install Safari-like navigator shim', { error: e?.message || String(e) });
+        }
         await func.setHeaders(context, jobItem, headerConfig);
         page = await context.newPage();
 
