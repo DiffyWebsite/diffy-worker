@@ -716,13 +716,7 @@ module.exports = {
                 Object.defineProperty(window.screen, 'pixelDepth', { get: () => 24, configurable: true });
               } catch (_) {}
 
-              // Device pixel ratio and outer/inner metrics parity
-              try {
-                Object.defineProperty(window, 'devicePixelRatio', { get: () => 2, configurable: true });
-                const approxChromeHeight = 80; // approximate Safari chrome height
-                Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth, configurable: true });
-                Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + approxChromeHeight, configurable: true });
-              } catch (_) {}
+              // Avoid overriding DPR and window metrics to let engine report native values
 
               // Pointer/hover media features for desktop Safari
               try {
@@ -1095,11 +1089,6 @@ module.exports = {
               caret-color: transparent !important;
               color-adjust: exact !important;
             }
-
-            /* Approximate overlay scrollbars by hiding tracks */
-            ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
-            ::-webkit-scrollbar-track { background: transparent !important; }
-            ::-webkit-scrollbar-thumb { background: transparent !important; }
             /* Preserve site font choices; do not override font-family */
             html, body { -webkit-text-size-adjust: 100%; }
           `
@@ -1117,13 +1106,12 @@ module.exports = {
         }
         logger.debug('page.goto done')
 
+        // Align with root: wait for fonts and readyState, add short settle delay
+        try { await safeEval(page, () => document.fonts && document.fonts.ready, undefined, 'fonts.ready gate') } catch (_) {}
         await safeWaitForFunction(page, () => document.readyState === 'complete', undefined, 'readyState complete');
+        try { await page.waitForTimeout(1000) } catch (_) {}
 
-        const stabilitySummary = await waitForVisualStability(page)
-        logger.debug('visual stabilization complete', stabilitySummary)
-
-        const fontReadyInitial = await waitForFontFaces(page)
-        logger.debug('font readiness after initial stabilization', fontReadyInitial)
+        // Align with root: avoid extra stabilization phases for parity
 
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
         await safeEval(page, () => {
@@ -1222,58 +1210,7 @@ module.exports = {
         await func.autoScroll(page, jobItem)
         logger.debug('double autoScroll done')
 
-        try {
-          await safeEval(page, () => {
-            const images = Array.from(document.querySelectorAll('img'))
-            for (const img of images) {
-              try {
-                if (img.loading === 'lazy') {
-                  img.loading = 'eager'
-                }
-                if (img.getAttribute('loading') === 'lazy') {
-                  img.setAttribute('loading', 'eager')
-                }
-
-                if (!img.getAttribute('src')) {
-                  const lazySrc = img.getAttribute('data-src') ||
-                    img.getAttribute('data-lazy-src') ||
-                    img.getAttribute('data-original') ||
-                    img.dataset?.src ||
-                    img.dataset?.original
-
-                  if (lazySrc) {
-                    img.setAttribute('src', lazySrc)
-                  }
-                }
-
-                if (!img.getAttribute('srcset')) {
-                  const lazySrcset = img.getAttribute('data-srcset') ||
-                    img.getAttribute('data-lazy-srcset') ||
-                    img.getAttribute('data-src-set') ||
-                    img.dataset?.srcset
-
-                  if (lazySrcset) {
-                    img.setAttribute('srcset', lazySrcset)
-                  }
-                }
-              } catch (_) {
-              }
-            }
-          }, undefined, 'promote lazy-loaded images')
-        } catch (error) {
-          logger.warn('Failed to promote lazy images', { error: error?.message || String(error) })
-        }
-
-        const postScrollStability = await waitForVisualStability(page, {
-          totalTimeoutMs: Math.max(LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS, 12000),
-          quietWindowMs: Math.max(LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS, 400),
-        })
-        const fontReadyFinal = await waitForFontFaces(page)
-
-        logger.debug('post-scroll visual stabilization complete', {
-          postScrollStability,
-          fontReadyFinal,
-        })
+        // Skip lazy image promotion and extra stabilization to mirror root behavior
 
         const takeoverHeight = await page.evaluate(() => {
           let maxHeight = Math.max(
@@ -1422,197 +1359,31 @@ module.exports = {
           }
         }
 
-        const deviceScaleFactor = contextOptions?.deviceScaleFactor ?? 1
-        const estimatedShotHeightPx = Math.ceil(pageHeight * deviceScaleFactor)
-        const exceedsSingleShotLimit = estimatedShotHeightPx > CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT
+        // Single-shot capture like root: viewport already expanded to full page height
+        try {
+          const screenshotOptions = {
+            path: filename,
+            fullPage: false,
+            omitBackground: false,
+            timeout: screenshotTimeoutMs,
+          }
 
-        // Capture successive strips within Chromium's per-image height cap and stitch them.
-        const captureSegmentedScreenshot = async () => {
-          ensureOpen(page, 'segmented capture setup')
+          if (animationsSetting) {
+            screenshotOptions.animations = animationsSetting
+          }
 
-          const cssLimitPerSegment = Math.max(
-              1,
-              Math.floor(CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT / deviceScaleFactor)
+          await screenshotWithAdaptiveTimeout(
+              page,
+              screenshotOptions,
+              'single-shot screenshot',
+              { pageHeight, timeoutMs: screenshotTimeoutMs }
           )
-          const normalizedPageHeight = Math.ceil(pageHeight)
-          const viewportWidthCss = Number.parseInt(jobItem.breakpoint, 10) || baseViewport.width || 0
-
-          if (!viewportWidthCss || !Number.isFinite(viewportWidthCss)) {
-            throw new Error('Invalid viewport width calculated for segmented capture')
-          }
-
-          const maxSegmentHeightCss = Math.min(cssLimitPerSegment, normalizedPageHeight)
-          if (!maxSegmentHeightCss || !Number.isFinite(maxSegmentHeightCss)) {
-            throw new Error('Invalid segment height calculated for segmented capture')
-          }
-
-          const segmentDescriptors = []
-          let offsetCss = 0
-          let partIndex = 0
-
-          logger.debug('Using segmented screenshot pipeline', {
+        } catch (err) {
+          const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
+          await captureViewportOnly('Single-shot capture failed; captured visible area instead.', {
             pageHeight,
-            normalizedPageHeight,
-            viewportWidthCss,
-            cssLimitPerSegment,
-            maxSegmentHeightCss,
-            deviceScaleFactor,
+            error: message,
           })
-
-          while (offsetCss < normalizedPageHeight) {
-            ensureOpen(page, `segmented capture part ${partIndex}`)
-
-            const remainingCss = Math.max(0, normalizedPageHeight - offsetCss)
-            const captureHeightCss = Math.min(maxSegmentHeightCss, remainingCss)
-
-            if (captureHeightCss <= 0) {
-              break
-            }
-
-            const clip = {
-              x: 0,
-              y: Math.max(0, Math.round(offsetCss)),
-              width: Math.round(viewportWidthCss),
-              height: Math.round(captureHeightCss),
-            }
-
-            const partPath = `/tmp/screenshot-${filenameKey}-part-${partIndex}.png`
-
-            const segmentScreenshotOptions = {
-              path: partPath,
-              clip,
-              omitBackground: false,
-              timeout: screenshotTimeoutMs,
-            }
-
-            if (animationsSetting) {
-              segmentScreenshotOptions.animations = animationsSetting
-            }
-
-            await screenshotWithAdaptiveTimeout(
-                page,
-                segmentScreenshotOptions,
-                `segmented capture part ${partIndex}`,
-                {
-                  partIndex,
-                  clip,
-                }
-            )
-
-            const metadata = await sharp(partPath).metadata()
-            if (!metadata?.height || !metadata?.width) {
-              throw new Error(`Segment metadata missing dimensions for part ${partIndex}`)
-            }
-
-            segmentDescriptors.push({
-              path: partPath,
-              heightPx: metadata.height,
-              widthPx: metadata.width,
-            })
-
-            offsetCss += captureHeightCss
-            partIndex += 1
-          }
-
-          if (!segmentDescriptors.length) {
-            throw new Error('Segmented capture produced no segments')
-          }
-
-          const totalHeightPx = segmentDescriptors.reduce((sum, seg) => sum + seg.heightPx, 0)
-          const outputWidthPx = segmentDescriptors.reduce((max, seg) => (
-              seg.widthPx > max ? seg.widthPx : max
-          ), 0)
-
-          if (!outputWidthPx || !Number.isFinite(outputWidthPx)) {
-            throw new Error('Segmented capture produced an invalid composite width')
-          }
-
-          let compositeOffset = 0
-          const composites = segmentDescriptors.map((seg) => {
-            const entry = { input: seg.path, left: 0, top: compositeOffset }
-            compositeOffset += seg.heightPx
-            return entry
-          })
-
-          await sharp({
-            create: {
-              width: outputWidthPx,
-              height: totalHeightPx,
-              channels: 4,
-              background: { r: 0, g: 0, b: 0, alpha: 0 },
-            },
-          })
-              .composite(composites)
-              .png()
-              .toFile(filename)
-
-          await Promise.all(
-              segmentDescriptors.map((seg) => fsPromises.unlink(seg.path).catch(() => {}))
-          )
-        }
-
-        if (exceedsSingleShotLimit) {
-          try {
-            await captureSegmentedScreenshot()
-          } catch (segmentedErr) {
-            const message = segmentedErr && Object.hasOwn(segmentedErr, 'message')
-                ? segmentedErr.message
-                : String(segmentedErr)
-
-            logger.warn('Segmented screenshot capture failed; falling back to viewport-only capture.', {
-              error: message,
-              pageHeight,
-              deviceScaleFactor,
-              estimatedShotHeightPx,
-              chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
-            })
-
-            await captureViewportOnly('Segmented capture failure; captured visible area instead.', {
-              pageHeight,
-              deviceScaleFactor,
-              estimatedShotHeightPx,
-              chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
-              error: message,
-            })
-          }
-        } else {
-          try {
-            const screenshotOptions = {
-              path: filename,
-              fullPage: true,
-              omitBackground: false,
-              timeout: screenshotTimeoutMs,
-            }
-
-            if (animationsSetting) {
-              screenshotOptions.animations = animationsSetting
-            }
-
-            await screenshotWithAdaptiveTimeout(
-                page,
-                screenshotOptions,
-                'full-page screenshot',
-                {
-                  pageHeight,
-                  deviceScaleFactor,
-                  timeoutMs: screenshotTimeoutMs,
-                }
-            )
-          } catch (err) {
-            const message = err && Object.hasOwn(err, 'message') ? err.message : String(err)
-            const hitHeightLimit = /Unable to capture screenshot/i.test(message)
-            const clipOutsideBounds = /Clipped area is either empty or outside the resulting image/i.test(message)
-            const recoverableScreenshotError = hitHeightLimit || clipOutsideBounds
-            if (!recoverableScreenshotError) {
-              throw err
-            }
-
-            await captureViewportOnly('Chromium could not capture the requested area in one shot; capturing visible area instead.', {
-              pageHeight,
-              chromiumLimitPx: CHROMIUM_SINGLE_CAPTURE_HEIGHT_LIMIT,
-              error: message,
-            })
-          }
         }
 
         logger.debug('screenshot done')

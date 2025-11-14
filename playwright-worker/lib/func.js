@@ -345,7 +345,7 @@ const buildHeaderConfig = (job) => {
     clientHints: undefined,
     locale: 'en-US',
     languages: ['en-US','en'],
-    timezoneId: 'America/New_York',
+    timezoneId: 'UTC',
   }
 }
 
