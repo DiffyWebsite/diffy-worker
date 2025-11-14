@@ -373,7 +373,12 @@ module.exports = {
 
     let iteration;
     for (iteration = 0; iteration < maxIterations; iteration++) {
-      await page.waitForSelector('body');
+      try {
+        await page.waitForSelector('body', { state: 'attached', timeout: 10000 })
+      } catch (_) {
+        logger.warn('autoScroll: body not found/attached in time; aborting scroll')
+        break
+      }
       scrollHeight = await page.evaluate('document.body.scrollHeight');
       await page.evaluate('window.scrollBy(0, 100)');
       totalHeight += 100;

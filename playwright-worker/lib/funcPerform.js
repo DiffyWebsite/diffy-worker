@@ -820,10 +820,15 @@ module.exports = {
         }
 
         let response;
+        // Allow per-job override, but default to 'networkidle'.
+        const requestedWaitUntil = (jobItem?.args?.navigation_wait_until || '').toString().toLowerCase();
+        const navWaitUntil = ['networkidle', 'load', 'domcontentloaded'].includes(requestedWaitUntil)
+          ? requestedWaitUntil
+          : 'networkidle';
 
         try {
           await page.waitForTimeout(func.random(120, 380));
-          response = await page.goto(url, {waitUntil: 'networkidle'})
+          response = await page.goto(url, { waitUntil: navWaitUntil })
 
           await handleIncapsula(page);
           await func.handleCloudflareChallenge(page, {frameWaitMs: 8000, retryDelayMs: 2500}).catch((error) => {
@@ -837,7 +842,7 @@ module.exports = {
             throw new Error('Cloudflare challenge unresolved: Please unblock challenges.cloudflare.com')
           }
         } catch (err) {
-          logger.warn('page was not loaded by networkidle', {url})
+          logger.warn('page was not loaded by first strategy', { url, waitUntil: navWaitUntil })
 
           try {
             response = await page.goto(url, {waitUntil: 'load'})
@@ -855,6 +860,24 @@ module.exports = {
             }
           } catch (err) {
             logger.error('page was not loaded by load or domcontentloaded', {error: err, url})
+          }
+        }
+
+        // Ensure DOM is at least parsed and <body> attached/visible before proceeding.
+        try {
+          await page.waitForLoadState('domcontentloaded', { timeout: 45000 })
+        } catch (e) {
+          logger.warn('domcontentloaded wait skipped/failed', { error: e?.message || String(e) })
+        }
+
+        try {
+          await page.waitForSelector('body', { state: 'visible', timeout: 20000 })
+        } catch (e) {
+          logger.warn('Body not visible after navigation; retrying with attached', { error: e?.message || String(e) })
+          try {
+            await page.waitForSelector('body', { state: 'attached', timeout: 10000 })
+          } catch (e2) {
+            logger.warn('Body not attached after navigation', { error: e2?.message || String(e2) })
           }
         }
 
