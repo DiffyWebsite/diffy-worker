@@ -38,7 +38,7 @@ const ensurePageOpen = (page, label = 'operation') => {
 
 const PRIMARY_BROWSER_PROFILE = {
   // Default to macOS Safari-like UA for WebKit runs.
-  userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${process.env.PLAYWRIGHT_SAFARI_VERSION || '18.0'} Safari/605.1.15`,
+  userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${process.env.PLAYWRIGHT_SAFARI_VERSION || '18.2'} Safari/605.1.15`,
   locale: 'en-US',
   languages: ['en-US', 'en'],
   timezoneId: 'America/New_York',

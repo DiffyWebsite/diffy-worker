@@ -629,10 +629,13 @@ module.exports = {
 
               defineRO(navigator, 'platform', 'MacIntel');
               defineRO(navigator, 'vendor', 'Apple Computer, Inc.');
-              defineRO(navigator, 'maxTouchPoints', 1);
+              defineRO(navigator, 'maxTouchPoints', 0);
               defineRO(navigator, 'hardwareConcurrency', 8);
               defineRO(navigator, 'language', languages && languages[0] ? languages[0] : 'en-US');
               defineRO(navigator, 'languages', Array.isArray(languages) && languages.length ? languages : ['en-US','en']);
+              try { defineRO(navigator, 'productSub', '20030107'); } catch (_) {}
+              try { defineRO(navigator, 'vendorSub', ''); } catch (_) {}
+              try { defineRO(navigator, 'product', 'Gecko'); } catch (_) {}
               try {
                 // Safari currently has no UA-CH; ensure userAgentData is undefined.
                 Object.defineProperty(navigator, 'userAgentData', { get: () => undefined, configurable: true });
@@ -661,6 +664,10 @@ module.exports = {
                 defineRO(navigator, 'plugins', plugins);
                 defineRO(navigator, 'mimeTypes', mimeTypes);
               } catch (_) {}
+
+              // Remove non-Safari navigator features
+              try { Object.defineProperty(navigator, 'deviceMemory', { get: () => undefined, configurable: true }); } catch (_) {}
+              try { Object.defineProperty(navigator, 'connection', { get: () => undefined, configurable: true }); } catch (_) {}
 
               // WebGL renderer/vendor hints similar to Safari
               const spoofWebGL = (proto) => {
@@ -720,6 +727,38 @@ module.exports = {
                 };
                 patchCanPlay(HTMLVideoElement?.prototype);
                 patchCanPlay(HTMLAudioElement?.prototype);
+              } catch (_) {}
+
+              // CSS.supports for common WebKit-prefixed properties
+              try {
+                if (window.CSS && typeof window.CSS.supports === 'function') {
+                  const origSupports = window.CSS.supports.bind(window.CSS);
+                  window.CSS.supports = function(prop, value) {
+                    try {
+                      if (arguments.length === 1) {
+                        const text = String(prop || '').toLowerCase();
+                        if (text.includes('-webkit-appearance')) return true;
+                        if (text.includes('image-set(')) return true;
+                      } else {
+                        const p = String(prop || '').toLowerCase();
+                        if (p === '-webkit-appearance') return true;
+                      }
+                    } catch (_) {}
+                    return origSupports.apply(this, arguments);
+                  }
+                }
+              } catch (_) {}
+
+              // APIs/objects seen in Safari desktop
+              try {
+                Object.defineProperty(window, 'safari', {
+                  configurable: true,
+                  get: () => ({
+                    pushNotification: {
+                      toString: () => '[object SafariRemoteNotification]'
+                    }
+                  })
+                });
               } catch (_) {}
 
               // APIs not present in Safari desktop
