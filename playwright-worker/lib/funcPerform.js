@@ -710,6 +710,12 @@ module.exports = {
                 }
               } catch (_) {}
 
+              // Screen parity typical for desktop Safari
+              try {
+                Object.defineProperty(window.screen, 'colorDepth', { get: () => 24, configurable: true });
+                Object.defineProperty(window.screen, 'pixelDepth', { get: () => 24, configurable: true });
+              } catch (_) {}
+
               // Media codec support similar to Safari (no WebM by default; H.264 AAC popular)
               try {
                 const patchCanPlay = (proto) => {
@@ -1046,6 +1052,7 @@ module.exports = {
 
         await safeAddStyleTag(page, {
           content: `
+            /* Disable animations for deterministic VRT */
             *, *::after, *::before {
               transition-delay: 0s !important;
               transition-duration: 0s !important;
@@ -1054,7 +1061,14 @@ module.exports = {
               animation-play-state: paused !important;
               caret-color: transparent !important;
               color-adjust: exact !important;
+              -webkit-font-smoothing: antialiased;
+              text-rendering: optimizeLegibility;
             }
+
+            /* Approximate overlay scrollbars by hiding tracks */
+            ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+            ::-webkit-scrollbar-track { background: transparent !important; }
+            ::-webkit-scrollbar-thumb { background: transparent !important; }
           `
         }).catch((e) => logger.warn('Failed to add style tag to disable animation', {error: e}))
 
