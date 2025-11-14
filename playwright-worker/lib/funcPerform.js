@@ -1094,20 +1094,14 @@ module.exports = {
               animation-play-state: paused !important;
               caret-color: transparent !important;
               color-adjust: exact !important;
-              -webkit-font-smoothing: antialiased;
-              text-rendering: optimizeLegibility;
             }
 
             /* Approximate overlay scrollbars by hiding tracks */
             ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
             ::-webkit-scrollbar-track { background: transparent !important; }
             ::-webkit-scrollbar-thumb { background: transparent !important; }
-
-            /* Prefer Safari system font stack aggressively */
-            html, body, button, input, select, textarea {
-              font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
-              -webkit-text-size-adjust: 100%;
-            }
+            /* Preserve site font choices; do not override font-family */
+            html, body { -webkit-text-size-adjust: 100%; }
           `
         }).catch((e) => logger.warn('Failed to add style tag to disable animation', {error: e}))
 
