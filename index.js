@@ -4,7 +4,7 @@
 // file-content -- if we pass job file as json as parameter
 // output-filepath -- path to a file to save the results in json format. Used by wrapper.
 
-const timeout = 10 * 60 * 1000; // 10 minutes timeout
+const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000; // 12 minutes timeout
 
 const process = require('process');
 const debug = !!process.env.DEBUG;
@@ -12,9 +12,8 @@ const debug = !!process.env.DEBUG;
 const { performance } = require('perf_hooks')
 const { Executor } = require('./lib/executor')
 const logger = require('./lib/logger')
-const { ChromiumBrowser } = require('./lib/chromiumBrowser')
+const { WebkitBrowser } = require('./lib/webkitBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
-const { resolveTimeoutWithNeedIncrease } = require('./lib/timeoutHelper')
 
 const argv = require('minimist')(process.argv.slice(2));
 const local = argv.local ? argv.local : false;
@@ -74,7 +73,14 @@ process.on('uncaughtException', (e) => {
   process.exit(6)
 })
 process.on('unhandledRejection', (reason, p) => {
-  logger.error('Unhandled Rejection at: Promise', p, reason)
+  const normalizedReason = reason instanceof Error
+    ? { message: reason.message, stack: reason.stack }
+    : reason;
+
+  logger.error('Unhandled Rejection at: Promise', {
+    promiseType: p?.constructor?.name || 'UnknownPromise',
+    reason: normalizedReason,
+  })
 });
 
 (async () => {
@@ -94,27 +100,61 @@ process.on('unhandledRejection', (reason, p) => {
   let results = []
   let handlerTimeExecuteStart = performance.now();
   const executor = new Executor(debug, local);
-  const chromiumBrowser = new ChromiumBrowser(debug, local)
+  const webkitBrowser = new WebkitBrowser(debug, local)
 
   let shutdownTimeout = null;
-  const scheduleShutdown = (timeoutMs) => {
+  let shutdownDeadlineTs = handlerTimeExecuteStart + DEFAULT_TIMEOUT_MS;
+
+  const triggerTimeout = async () => {
+    try {
+      const result = await executor.timeout(handlerTimeExecuteStart)
+      executor.shutdown()
+      logger.warn('Timeout', result);
+      process.exit(1);
+    } catch (e) {
+      process.exit(1);
+    }
+  };
+
+  const scheduleShutdown = (requestedTimeoutMs) => {
     if (shutdownTimeout) {
       clearTimeout(shutdownTimeout);
     }
 
-    shutdownTimeout = setTimeout(async () => {
-      try {
-        const result = await executor.timeout(handlerTimeExecuteStart)
-        executor.shutdown()
-        logger.warn('Timeout', result);
-        process.exit(1);
-      } catch (e) {
-        process.exit(1);
-      }
-    }, timeoutMs);
+    const numericCandidate = Number.isFinite(requestedTimeoutMs)
+      ? requestedTimeoutMs
+      : Number.parseInt(requestedTimeoutMs, 10);
+
+    const requestedDuration = (Number.isFinite(numericCandidate) && numericCandidate > 0)
+      ? numericCandidate
+      : DEFAULT_TIMEOUT_MS;
+
+    const effectiveDuration = Math.max(requestedDuration, DEFAULT_TIMEOUT_MS);
+    const proposedDeadline = handlerTimeExecuteStart + effectiveDuration;
+
+    if (proposedDeadline > shutdownDeadlineTs) {
+      shutdownDeadlineTs = proposedDeadline;
+    }
+
+    const remainingMs = Math.max(Math.round(shutdownDeadlineTs - performance.now()), 0);
+
+    if (debug) {
+      logger.debug('scheduleShutdown', {
+        requestedTimeoutMs,
+        effectiveTimeoutMs: shutdownDeadlineTs - handlerTimeExecuteStart,
+        remainingMs,
+      });
+    }
+
+    if (remainingMs <= 0) {
+      triggerTimeout().catch(() => process.exit(1));
+      return;
+    }
+
+    shutdownTimeout = setTimeout(triggerTimeout, remainingMs);
   };
 
-  scheduleShutdown(timeout);
+  scheduleShutdown(DEFAULT_TIMEOUT_MS);
 
   try {
     let proxy = null
@@ -132,10 +172,12 @@ process.on('unhandledRejection', (reason, p) => {
       proxy = process.env.PROXY;
     }
 
-    const needIncrease = data?.params?.need_increase;
-    const handlerTimeout = resolveTimeoutWithNeedIncrease(needIncrease, timeout);
-    scheduleShutdown(handlerTimeout);
-    browser = await chromiumBrowser.getBrowser(proxy, { needIncrease, handlerTimeout })
+    const delaySec = Number(data?.params?.delay_before_screenshot || 0);
+    const extraBufferMs = Math.min(Math.max(delaySec, 0) * 3000 + 120000, 20 * 60 * 1000);
+    const baseHandler = Math.max(DEFAULT_TIMEOUT_MS, 5 * 60 * 1000 + extraBufferMs);
+
+    scheduleShutdown(baseHandler);
+    browser = await webkitBrowser.getBrowser(proxy)
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
@@ -149,8 +191,11 @@ process.on('unhandledRejection', (reason, p) => {
       });
     }
   } catch (err) {
+    if (shutdownTimeout) {
+      clearTimeout(shutdownTimeout)
+    }
     await closeBrowser(browser)
-    await chromiumBrowser.closeProxy()
+    await webkitBrowser.closeProxy()
 
     logger.error('Failed to run executor', {
       errorMessage: err?.message || 'Unknown error',
@@ -162,7 +207,7 @@ process.on('unhandledRejection', (reason, p) => {
 
   clearTimeout(shutdownTimeout)
   await closeBrowser(browser)
-  await chromiumBrowser.closeProxy();
+  await webkitBrowser.closeProxy();
 
   if (isSqs && message) {
     await sqsSender.deleteSQSMessage(message);
@@ -177,11 +222,11 @@ process.on('unhandledRejection', (reason, p) => {
  * @return {Promise<void>}
  */
 const closeBrowser = async (browser) => {
-  if (browser !== null) {
+  if (browser && typeof browser.close === 'function') {
     try {
       await browser.close()
     } catch (e) {
-      logger.error('Failed to close browser', e)
+      logger.error('Failed to close browser', { error: e })
     }
   }
 }
