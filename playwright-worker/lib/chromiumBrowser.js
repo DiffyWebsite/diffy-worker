@@ -28,6 +28,7 @@ class ChromiumBrowser {
     this.anonymizedProxy = null;
     this.staticArgs = [
       '--no-sandbox',
+      '--disable-gpu',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
       '--disable-features=IsolateOrigins,site-per-process',
