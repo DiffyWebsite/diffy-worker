@@ -32,15 +32,6 @@ class ChromiumBrowser {
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
       '--disable-features=IsolateOrigins,site-per-process',
-      '--disable-lcd-text',
-      '--disable-font-subpixel-positioning',
-      '--disable-oop-rasterization',
-      '--disable-partial-raster',
-      '--disable-threaded-compositing',
-      '--disable-skia-runtime-opts',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
     ];
     this.launchProfile = createLaunchProfile();
     this.localExecutivePath = '/usr/bin/chromium-browser';
