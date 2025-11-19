@@ -45,7 +45,6 @@ class ChromiumBrowser {
     const launchOptions = {
       args: launchArgs,
       headless: true,
-      ignoreDefaultArgs: ['--hide-scrollbars'],
       chromiumSandbox: this.local,
       timeout: 120000,
     };
