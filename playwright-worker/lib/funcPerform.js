@@ -823,7 +823,7 @@ module.exports = {
                     if (!node.dataset) {
                       node.dataset = {}
                     }
-                    node.dataset.diffyForceMask = 'true'
+                    node.dataset.diffyMaskOverlay = 'true'
                   } catch (_) {}
                 })
               })
