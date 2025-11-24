@@ -939,12 +939,28 @@ module.exports = {
 
 
         if (stabilizationEnabled) {
-          // hide google maps (requires stabilization to be enabled)
-          await func.hideBanners(page, {
-            args: {
-              elements: ['iframe[src*="google.com/maps"]']
+          const googleMapSelectors = ['iframe[src*="google.com/maps"]']
+          logger.debug('Attempting to hide Google Maps iframes', { selectors: googleMapSelectors })
+          try {
+            const mapMaskResult = await func.hideBanners(page, {
+              args: {
+                elements: googleMapSelectors
+              }
+            })
+
+            const maskStats = {
+              maskedSelectors: mapMaskResult?.maskedSelectors ?? 0,
+              maskedElements: mapMaskResult?.maskedElements ?? 0,
             }
-          })
+
+            if (maskStats.maskedElements > 0) {
+              logger.info('Google Maps mask applied', maskStats)
+            } else {
+              logger.warn('Google Maps mask applied but no elements were hidden', maskStats)
+            }
+          } catch (mapMaskErr) {
+            logger.error('Failed to hide Google Maps iframes', { error: mapMaskErr })
+          }
         }
 
         await func.hideBanners(page, jobItem)
