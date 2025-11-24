@@ -775,7 +775,136 @@ module.exports = {
 
         if (stabilizationEnabled) {
           await (async () => {
-            await eval(jobItem.args.stabilization_code);
+            await page.evaluate(async () => {
+              // Batch style modifications to remove animations, transitions, and manage heights.
+              const pageStyle = document.createElement('style');
+              pageStyle.textContent = `
+                  *, *::before, *::after {
+                      animation: none !important;
+                      transition: none !important;
+                      caret-color: transparent !important;
+                      color-adjust: exact !important;
+                  }
+                  html.pum-open { overflow: auto !important; }
+                  .pum-overlay, #CybotCookiebotDialog, #velaro-container, iframe[title="reCAPTCHA"], 
+                  #hs-eu-cookie-confirmation, #onetrust-consent-sdk, .cookie-notice-overlay {
+                      display: none !important;
+                  }
+              `;
+              document.head.appendChild(pageStyle);
+
+              // Pause and reset videos
+              document.querySelectorAll('video').forEach(video => {
+                try {
+                  video.pause();
+                  video.currentTime = 0;
+
+                  video.play = () => {
+                    return Promise.resolve();
+                  };
+                } catch (e) {
+                }
+              });
+
+              // Destroy jarallax if present
+              if (typeof window.jarallax !== 'undefined') {
+                try {
+                  window.jarallax(document.querySelectorAll('.jarallax'), 'destroy');
+                } catch (e) {
+                }
+              }
+
+              // Stop swiper autoplay and reset
+              document.querySelectorAll('.swiper, .swiper-container').forEach(element => {
+                if (element.swiper) {
+                  try {
+                    element.swiper.autoplay.stop();
+                    element.swiper.slideTo(0, 0);
+                    element.swiper.setProgress(0, 0);
+                  } catch (e) {
+                  }
+                }
+              });
+
+              // Stop Vimeo videos
+              if (typeof Vimeo !== 'undefined') {
+                document.querySelectorAll('iframe[src*="vimeo"]').forEach(iframe => {
+                  try {
+                    new Vimeo.Player(iframe).destroy();
+                  } catch (e) {
+                  }
+                });
+              }
+
+              // Stop YouTube videos
+              document.querySelectorAll('iframe[src*="youtube"]').forEach(iframe => {
+                try {
+                  iframe.contentWindow.postMessage('{"event":"command","func":"stopVideo","args":""}', '*');
+                } catch (e) {
+                }
+              });
+
+              // Shut down Intercom if available
+              if (typeof Intercom !== 'undefined') {
+                try {
+                  Intercom('shutdown');
+                } catch (e) {
+                }
+              }
+
+              // Stop Presto player
+              document.querySelectorAll('presto-player').forEach(el => {
+                try {
+                  el.stop();
+                } catch (e) {
+                }
+              });
+
+              // Hide unwanted banners and popups
+              document.querySelectorAll('#CybotCookiebotDialog, #velaro-container, iframe[title="reCAPTCHA"], #hs-eu-cookie-confirmation, #onetrust-consent-sdk, .cookie-notice-overlay, .pum-overlay, .cky-consent-container').forEach(el => {
+                el.remove();
+              });
+            });
+
+            // Hide YouTube iframe videos that could cause layout instability
+            await func.hideBanners(page, { args: { elements: ['iframe[src*="youtube.com"]', 'lite-youtube'] } });
+
+            await page.evaluate(async () => {
+              // Record and stabilize element heights
+              window.diffyElementsHeights = [];
+
+              await (async function traverse(node, elementsHeights) {
+                const viewportHeight = window.innerHeight;
+
+                if (viewportHeight && node.childNodes.length) {
+                  for (const child of node.childNodes) {
+                    if (child.nodeType === Node.ELEMENT_NODE) {
+                      if (
+                        !child.offsetHeight ||
+                        window.getComputedStyle(child).getPropertyValue('opacity') <= 0 ||
+                        ['script', 'noscript', 'input', 'br', 'hr'].includes(child.tagName.toLowerCase())
+                      ) {
+                        continue;
+                      }
+
+                      const element = {
+                        node: child,
+                        height: child.offsetHeight,
+                        viewportRatio: (child.offsetHeight / viewportHeight).toFixed(2),
+                        childNodes: [],
+                      };
+
+                      elementsHeights.push(element);
+
+                      // Traverse deeper if there are child nodes
+                      if (child.childNodes && child.childNodes.length) {
+                        await traverse(child, element.childNodes);
+                      }
+                    }
+                  }
+                }
+              })(document.body, window.diffyElementsHeights);
+            });
           })();
 
           await page.evaluate(async () => {
