@@ -11,7 +11,6 @@ const LAYOUT_STABILITY_DEFAULT_TIMEOUT_MS = 6000
 const LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS = 300
 const IMAGE_STABILITY_TIMEOUT_MS = 5000
 const FONT_STABILITY_TIMEOUT_MS = 7000
-const STABILIZATION_SNIPPET_TIMEOUT_MS = 5000
 
 const sendResult = (job, jobItem, data) => {
   job.status = true
@@ -845,16 +844,12 @@ module.exports = {
 
         const stabilizationEnabled = Boolean(Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization)
 
-        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
-        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
-
         if (stabilizationEnabled) {
           await (async () => {
             await eval(jobItem.args.stabilization_code);
           })();
 
           await page.evaluate(async () => {
-
             const stabilizeHeight = async (elementsHeights, level) => {
               for (const element of elementsHeights) {
                 if (document.body.contains(element.node)) {
@@ -882,6 +877,8 @@ module.exports = {
           })
         }
 
+        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
+        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
 
         if (stabilizationEnabled) {
           const googleMapSelectors = ['iframe[src*="google.com/maps"]']
