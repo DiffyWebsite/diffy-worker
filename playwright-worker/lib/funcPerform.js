@@ -906,7 +906,12 @@ module.exports = {
               })(document.body, window.diffyElementsHeights);
             });
           })();
+        }
 
+        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
+        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
+
+        if (stabilizationEnabled) {
           await page.evaluate(async () => {
             const stabilizeHeight = async (elementsHeights, level) => {
               for (const element of elementsHeights) {
@@ -934,9 +939,6 @@ module.exports = {
             await stabilizeHeight(window.diffyElementsHeights ?? [], 1);
           })
         }
-
-        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
-        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
 
         if (stabilizationEnabled) {
           await func.hideBanners(page, { args: { elements: ['iframe[src*="google.com/maps"]'] } })
