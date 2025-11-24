@@ -810,44 +810,7 @@ module.exports = {
         logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
 
         if (stabilizationEnabled) {
-          const googleMapSelectors = ['iframe[src*="google.com/maps"]']
-          logger.debug('Attempting to hide Google Maps iframes', { selectors: googleMapSelectors })
-          try {
-            await page.evaluate((selectors) => {
-              selectors.forEach((selector) => {
-                if (typeof selector !== 'string') {
-                  return
-                }
-                document.querySelectorAll(selector).forEach((node) => {
-                  try {
-                    if (!node.dataset) {
-                      node.dataset = {}
-                    }
-                    node.dataset.diffyMaskOverlay = 'true'
-                  } catch (_) {}
-                })
-              })
-            }, googleMapSelectors)
-
-            const mapMaskResult = await func.hideBanners(page, {
-              args: {
-                elements: googleMapSelectors
-              }
-            })
-
-            const maskStats = {
-              maskedSelectors: mapMaskResult?.maskedSelectors ?? 0,
-              maskedElements: mapMaskResult?.maskedElements ?? 0,
-            }
-
-            if (maskStats.maskedElements > 0) {
-              logger.info('Google Maps mask applied', maskStats)
-            } else {
-              logger.warn('Google Maps mask applied but no elements were hidden', maskStats)
-            }
-          } catch (mapMaskErr) {
-            logger.error('Failed to hide Google Maps iframes', { error: mapMaskErr })
-          }
+          await func.hideBanners(page, { args: { elements: ['iframe[src*="google.com/maps"]'] } })
         }
 
         await func.delayBeforeScreenshot(page, jobItem)
