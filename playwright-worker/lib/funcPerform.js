@@ -252,58 +252,6 @@ const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
   return page.addStyleTag(opts)
 }
 
-const runStabilizationSnippet = async (page, code, { timeoutMs = STABILIZATION_SNIPPET_TIMEOUT_MS } = {}) => {
-  if (!code || !code.toString().trim().length) {
-    return { executed: false }
-  }
-
-  ensureOpen(page, 'stabilization snippet start')
-
-  try {
-    const result = await safeEval(page, ({ source, timeout }) => {
-      return new Promise((resolve, reject) => {
-        let settled = false
-        const finish = (fn, value) => {
-          if (settled) return
-          settled = true
-          fn(value)
-        }
-
-        const timer = setTimeout(() => finish(reject, new Error('stabilization script timed out')), timeout)
-
-        try {
-          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-          const executor = new AsyncFunction(source)
-
-          Promise.resolve(executor.call(window))
-              .then((value) => {
-                clearTimeout(timer)
-                finish(resolve, value)
-              })
-              .catch((error) => {
-                clearTimeout(timer)
-                finish(reject, error)
-              })
-        } catch (error) {
-          clearTimeout(timer)
-          finish(reject, error)
-        }
-      })
-    }, { source: code, timeout: timeoutMs }, 'stabilization snippet evaluation')
-
-    return {
-      executed: true,
-      result,
-    }
-  } catch (error) {
-    logger.warn('Stabilization snippet failed', { error: error?.message || String(error) })
-    return {
-      executed: false,
-      error: error?.message || String(error),
-    }
-  }
-}
-
 const waitForFontFaces = async (page, {
   timeoutMs = FONT_STABILITY_TIMEOUT_MS,
 } = {}) => {
@@ -900,13 +848,10 @@ module.exports = {
         const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
         logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
 
-        let stabilizationSnippetResult = null
         if (stabilizationEnabled) {
-          stabilizationSnippetResult = await runStabilizationSnippet(page, jobItem.args.stabilization_code)
-          logger.debug('stabilization snippet executed', {
-            executed: stabilizationSnippetResult?.executed,
-            error: stabilizationSnippetResult?.error,
-          })
+          await (async () => {
+            await eval(jobItem.args.stabilization_code);
+          })();
 
           await page.evaluate(async () => {
 
