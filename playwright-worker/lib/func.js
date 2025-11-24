@@ -1175,6 +1175,14 @@ module.exports = {
         )
       }
 
+      const consumeForceMask = (element) => {
+        const forced = element?.dataset?.diffyForceMask === 'true'
+        if (forced && element?.dataset) {
+          delete element.dataset.diffyForceMask
+        }
+        return forced
+      }
+
       const isVisible = (element) => {
         if (!element || isHiddenByAttrs(element)) {
           return false
@@ -1201,6 +1209,18 @@ module.exports = {
         return (element.offsetWidth > 0 || element.offsetHeight > 0 || element.getClientRects().length > 0)
       }
 
+      const shouldMask = (element) => {
+        if (!element) {
+          return false
+        }
+
+        if (consumeForceMask(element)) {
+          return true
+        }
+
+        return isVisible(element)
+      }
+
       const manager = ensureMaskManager()
 
       const selectors = Array.isArray(_elements)
@@ -1218,7 +1238,7 @@ module.exports = {
 
         const nodes = Array.from(document.querySelectorAll(trimmed))
         nodes.forEach((node) => {
-          if (!isVisible(node)) {
+          if (!shouldMask(node)) {
             return
           }
           manager.attach(node)

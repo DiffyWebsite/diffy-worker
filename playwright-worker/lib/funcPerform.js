@@ -884,6 +884,22 @@ module.exports = {
           const googleMapSelectors = ['iframe[src*="google.com/maps"]']
           logger.debug('Attempting to hide Google Maps iframes', { selectors: googleMapSelectors })
           try {
+            await page.evaluate((selectors) => {
+              selectors.forEach((selector) => {
+                if (typeof selector !== 'string') {
+                  return
+                }
+                document.querySelectorAll(selector).forEach((node) => {
+                  try {
+                    if (!node.dataset) {
+                      node.dataset = {}
+                    }
+                    node.dataset.diffyForceMask = 'true'
+                  } catch (_) {}
+                })
+              })
+            }, googleMapSelectors)
+
             const mapMaskResult = await func.hideBanners(page, {
               args: {
                 elements: googleMapSelectors
@@ -905,9 +921,6 @@ module.exports = {
           }
         }
 
-        await func.hideBanners(page, jobItem)
-        logger.debug('hideBanners done')
-
         await func.delayBeforeScreenshot(page, jobItem)
 
         await func.addJsCode(page, jobItem)
@@ -927,6 +940,9 @@ module.exports = {
 
         await func.addFixtures(page, jobItem)
         logger.debug('addFixtures done')
+
+        await func.hideBanners(page, jobItem)
+        logger.debug('hideBanners done')
 
         // Recalculate page height after modifications.
         if (!page.isClosed()) {
