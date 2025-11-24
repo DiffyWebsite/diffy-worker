@@ -797,13 +797,6 @@ module.exports = {
           await context.addCookies(cookies)
         }
 
-        try {
-          const origin = new URL(url).origin
-          await context.grantPermissions(['geolocation', 'clipboard-read', 'clipboard-write', 'notifications', 'camera', 'microphone'], {origin})
-        } catch (error) {
-          logger.warn('Failed to grant permissions for origin', {error})
-        }
-
         let response;
 
         try {
@@ -902,19 +895,19 @@ module.exports = {
         await func.autoScroll(page, jobItem)
         logger.debug('autoScroll done')
 
+        const stabilizationEnabled = Boolean(Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization)
+
+        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
+        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
+
         let stabilizationSnippetResult = null
-        if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
+        if (stabilizationEnabled) {
           stabilizationSnippetResult = await runStabilizationSnippet(page, jobItem.args.stabilization_code)
           logger.debug('stabilization snippet executed', {
             executed: stabilizationSnippetResult?.executed,
             error: stabilizationSnippetResult?.error,
           })
-        }
 
-        const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
-        logger.debug('updatePageViewport done', {page_height: initialViewportHeight})
-
-        if (Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization) {
           await page.evaluate(async () => {
 
             const stabilizeHeight = async (elementsHeights, level) => {
@@ -942,10 +935,20 @@ module.exports = {
 
             await stabilizeHeight(window.diffyElementsHeights ?? [], 1);
           })
-
-          // hide google maps
-          await func.hideBanners(page, {args: {elements: ['iframe[src*="google.com/maps"]']}})
         }
+
+
+        if (stabilizationEnabled) {
+          // hide google maps (requires stabilization to be enabled)
+          await func.hideBanners(page, {
+            args: {
+              elements: ['iframe[src*="google.com/maps"]']
+            }
+          })
+        }
+
+        await func.hideBanners(page, jobItem)
+        logger.debug('hideBanners done')
 
         await func.delayBeforeScreenshot(page, jobItem)
 
@@ -966,9 +969,6 @@ module.exports = {
 
         await func.addFixtures(page, jobItem)
         logger.debug('addFixtures done')
-
-        await func.hideBanners(page, jobItem)
-        logger.debug('hideBanners done')
 
         // Recalculate page height after modifications.
         if (!page.isClosed()) {

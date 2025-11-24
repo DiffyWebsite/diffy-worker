@@ -269,8 +269,6 @@ const awaitResponse = async (page, timeout = 60000) => {
   ])
 }
 
-
-
 const buildHeaderConfig = (job) => {
   const headers = {}
   let profile = null
@@ -961,6 +959,7 @@ module.exports = {
     }
 
     return page.evaluate((_elements) => {
+
       const ensureMaskManager = () => {
         if (window.__diffyMaskManager) {
           return window.__diffyMaskManager

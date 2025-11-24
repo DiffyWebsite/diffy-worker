@@ -4,6 +4,12 @@ const { anonymizeProxy, closeAnonymizedProxy } = require('proxy-chain');
 const { chromium } = require('playwright');
 const logger = require('./logger');
 
+/**
+ * @typedef {import('playwright').Browser} Browser
+ * @typedef {import('playwright').BrowserContext} BrowserContext
+ * @typedef {import('playwright').BrowserContextOptions} BrowserContextOptions
+ */
+
 const randomBetween = (min, max) => crypto.randomInt(min, max + 1);
 
 const realisticViewports = [
