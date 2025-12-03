@@ -525,8 +525,8 @@ module.exports = {
 
         await context.clearCookies();
         logger.debug('setHeaders prepared', {
-          userAgent: headerConfig.userAgent,
-          extraHeaders: headerConfig.extraHeaders || {}
+          userAgent: userAgentString,
+          extraHeaders: headerState?.headers || {}
         })
 
         if (!Object.hasOwn(jobItem, 'url') || !Object.hasOwn(jobItem, 'breakpoint')) {
