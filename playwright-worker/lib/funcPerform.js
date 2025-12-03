@@ -851,6 +851,61 @@ module.exports = {
                 }
               });
 
+              // Stabilize Slick sliders by halting autoplay and forcing first slide
+              document.querySelectorAll('.slick-slider').forEach((slider) => {
+                const forceFirstSlide = () => {
+                  const track = slider.querySelector('.slick-track');
+                  if (track) {
+                    track.style.transitionDuration = '0ms';
+                    track.style.transitionProperty = 'none';
+                    track.style.transform = 'translate3d(0px, 0px, 0px)';
+                  }
+
+                  const slides = slider.querySelectorAll('.slick-slide');
+                  slides.forEach((slide, index) => {
+                    const isFirst = index === 0;
+                    slide.classList.toggle('slick-current', isFirst);
+                    slide.classList.toggle('slick-active', isFirst);
+                    slide.setAttribute('aria-hidden', (!isFirst).toString());
+                    slide.style.transitionDuration = '0ms';
+                    slide.style.transitionProperty = 'none';
+                  });
+
+                  slider.querySelectorAll('.slick-dots li').forEach((dot, index) => {
+                    dot.classList.toggle('slick-active', index === 0);
+                  });
+                };
+
+                try {
+                  const instance = slider && slider.slick;
+
+                  if (instance) {
+                    const setOption = instance.slickSetOption || instance.setOption;
+                    if (typeof setOption === 'function') {
+                      setOption.call(instance, 'speed', 0, true);
+                      setOption.call(instance, 'autoplay', false, true);
+                    }
+
+                    const goTo = instance.slickGoTo || instance.goTo || instance.slideHandler;
+                    if (typeof goTo === 'function') {
+                      goTo.call(instance, 0, true);
+                    }
+
+                    const pause = instance.slickPause || instance.pause || instance.autoPlayClear;
+                    if (typeof pause === 'function') {
+                      pause.call(instance);
+                    } else if (instance.autoPlayTimer) {
+                      clearInterval(instance.autoPlayTimer);
+                      instance.autoPlayTimer = null;
+                    }
+                  } else {
+                    forceFirstSlide();
+                  }
+                } catch (e) {
+                  forceFirstSlide();
+                }
+              });
+
               // Stop Vimeo videos
               if (typeof Vimeo !== 'undefined') {
                 document.querySelectorAll('iframe[src*="vimeo"]').forEach(iframe => {
