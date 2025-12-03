@@ -468,33 +468,8 @@ module.exports = {
       return Promise.resolve()
     }
 
-    const parseDelayCollection = (value) => {
-      if (Array.isArray(value)) {
-        return value
-      }
-      if (typeof value === 'string') {
-        return value.split(/[\s,]+/)
-      }
-      return []
-    }
+    await page.evaluate((_fixtures) => {
 
-    const defaultDelays = [250, 750, 1500]
-    const parsedDelays = parseDelayCollection(job.args.fixture_reapply_delays_ms)
-    const delayNumbers = parsedDelays
-      .map((delay) => Number.parseInt(delay, 10))
-      .filter((delay) => Number.isFinite(delay) && delay > 0)
-    const reapplyDelays = delayNumbers.length ? delayNumbers : defaultDelays
-
-    let persistWindowMs = reapplyDelays.length ? Math.max(...reapplyDelays) : 0
-    const persistOverride = Number.parseInt(
-      job.args.fixture_persist_ms ?? job.args.fixture_persist_window_ms,
-      10,
-    )
-    if (Number.isFinite(persistOverride) && persistOverride > 0) {
-      persistWindowMs = persistOverride
-    }
-
-    const summary = await page.evaluate(async ({ fixtures, reapplyDelays, persistWindowMs }) => {
       const clampPositive = (value, fallback) => {
         const number = Number.parseFloat(value)
         if (Number.isFinite(number) && number > 0) {
@@ -503,47 +478,10 @@ module.exports = {
         return fallback
       }
 
-      const deriveBoxDimensions = (node, fallbackWidth = 300, fallbackHeight = 200) => {
-        if (!node) {
-          return { width: fallbackWidth, height: fallbackHeight }
-        }
-
-        const style = window.getComputedStyle(node)
-        const rect = typeof node.getBoundingClientRect === 'function'
-          ? node.getBoundingClientRect()
-          : { width: 0, height: 0 }
-
-        const candidatesWidth = [
-          node.naturalWidth,
-          node.width,
-          node.clientWidth,
-          clampPositive(node.getAttribute?.('width'), 0),
-          clampPositive(style?.width, 0),
-          clampPositive(rect?.width, 0),
-        ].filter(value => Number.isFinite(value) && value > 0)
-
-        const candidatesHeight = [
-          node.naturalHeight,
-          node.height,
-          node.clientHeight,
-          clampPositive(node.getAttribute?.('height'), 0),
-          clampPositive(style?.height, 0),
-          clampPositive(rect?.height, 0),
-        ].filter(value => Number.isFinite(value) && value > 0)
-
-        const width = candidatesWidth.length ? Math.max(...candidatesWidth) : fallbackWidth
-        const height = candidatesHeight.length ? Math.max(...candidatesHeight) : fallbackHeight
-
-        return {
-          width: clampPositive(width, fallbackWidth),
-          height: clampPositive(height, fallbackHeight),
-        }
-      }
-
       const buildInlinePlaceholder = (width, height, label = 'Diffy fixture') => {
         const safeWidth = clampPositive(width, 300)
         const safeHeight = clampPositive(height, 200)
-        const text = `${safeWidth}×${safeHeight}`
+        const text = `${safeWidth}x${safeHeight}`
         const svg = `<?xml version="1.0" encoding="UTF-8"?>\n` +
           `<svg xmlns="http://www.w3.org/2000/svg" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}">` +
           `<defs><style>@font-face{font-family:'Inter';src:local('Arial')}</style></defs>` +
@@ -557,399 +495,154 @@ module.exports = {
         return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
       }
 
-      if (!Array.isArray(fixtures) || !fixtures.length) {
-        return {
-          attempts: 0,
-          applied: 0,
-          persistWindowMs,
-          watchersActive: false,
-          fixtureCount: 0,
-        }
-      }
+      function diffyImageFixture (el, selector) {
+        return new Promise((resolve) => {
+          try {
+            const w = clampPositive(el.width || el.naturalWidth, 300)
+            const h = clampPositive(el.height || el.naturalHeight, 200)
+            const src = el.src || null
 
-      const ensureManager = () => {
-        const existing = window.__diffyFixtureManager
-        if (existing && typeof existing.destroy === 'function') {
-          existing.destroy()
-        }
+            if (src && w && h) {
+              const placeholderSrc = buildInlinePlaceholder(w, h, 'Diffy image fixture')
 
-        const getDescriptor = (node, prop) => {
-          let current = node
-          while (current) {
-            const descriptor = Object.getOwnPropertyDescriptor(current, prop)
-            if (descriptor) {
-              return descriptor
-            }
-            current = Object.getPrototypeOf(current)
-          }
-          return null
-        }
-
-        const manager = {
-          fixtures: [],
-          reapplyFixtures: [],
-          observers: [],
-          timers: [],
-          lockedMap: new Map(),
-          applyingDepth: 0,
-          isApplying () {
-            return this.applyingDepth > 0
-          },
-          incrementApplying () {
-            this.applyingDepth += 1
-          },
-          decrementApplying () {
-            if (this.applyingDepth > 0) {
-              this.applyingDepth -= 1
-            }
-          },
-          registerFixture (rawFixture) {
-            const selector = typeof rawFixture?.selector === 'string'
-              ? rawFixture.selector.trim()
-              : ''
-            if (!selector) {
-              return
-            }
-
-            const rawType = typeof rawFixture?.type === 'string'
-              ? rawFixture.type.trim().toLowerCase()
-              : ''
-            const type = rawType === 'image'
-              ? 'image'
-              : (rawType === 'background image' || rawType === 'background-image')
-                ? 'background'
-                : 'text'
-
-            const entry = {
-              selector,
-              type,
-              apply: null,
-              reapply: type === 'text',
-            }
-
-            if (entry.type === 'text') {
-              const rawContent = rawFixture?.content
-              const contentString = typeof rawContent === 'string'
-                ? rawContent
-                : (rawContent ?? '').toString()
-              entry.content = contentString
-              entry.hashValue = `${contentString.length}`
-              entry.locked = new WeakMap()
-
-              const lockNode = (node) => {
-                if (!node) {
-                  return null
-                }
-                let setterMap = entry.locked.get(node)
-                if (setterMap) {
-                  return setterMap
-                }
-
-                setterMap = {}
-                const lockedProps = manager.lockedMap.get(node) || new Set()
-
-                const props = ['innerHTML', 'textContent', 'innerText']
-                for (const prop of props) {
-                  const descriptor = getDescriptor(node, prop)
-                  if (!descriptor || typeof descriptor.set !== 'function') {
-                    continue
-                  }
-
-                  const originalSetter = descriptor.set.bind(node)
-                  const originalGetter = descriptor.get ? descriptor.get.bind(node) : null
-
-                  setterMap[prop] = originalSetter
-
-                  const lockedDescriptor = {
-                    configurable: true,
-                    enumerable: descriptor.enumerable,
-                    get () {
-                      if (originalGetter) {
-                        try {
-                          return originalGetter()
-                        } catch (_) {
-                          return contentString
-                        }
-                      }
-                      return contentString
-                    },
-                    set () {
-                      try {
-                        originalSetter(contentString)
-                      } catch (_) {}
-                      try {
-                        node.setAttribute('data-diffy-fixture', 'text')
-                        node.setAttribute('data-diffy-fixture-hash', entry.hashValue)
-                      } catch (_) {}
-                    },
-                  }
-
-                  try {
-                    Object.defineProperty(node, prop, lockedDescriptor)
-                    lockedProps.add(prop)
-                  } catch (_) {}
-                }
-
-                if (lockedProps.size) {
-                  manager.lockedMap.set(node, lockedProps)
-                  entry.locked.set(node, setterMap)
-                }
-
-                return setterMap
-              }
-
-              entry.apply = (node) => {
-                if (!node) {
-                  return false
-                }
-
-                const setterMap = lockNode(node) || {}
-                const expected = entry.content
-                let changed = false
-
-                if (node.innerHTML !== expected) {
-                  manager.incrementApplying()
-                  try {
-                    if (typeof setterMap.innerHTML === 'function') {
-                      setterMap.innerHTML(expected)
-                    } else {
-                      node.innerHTML = expected
-                    }
-                    changed = true
-                  } catch (_) {
-                    changed = false
-                  } finally {
-                    manager.decrementApplying()
-                  }
-                }
-
-                try {
-                  node.setAttribute('data-diffy-fixture', 'text')
-                  node.setAttribute('data-diffy-fixture-hash', entry.hashValue)
-                } catch (_) {}
-
-                return changed
-              }
-
-              this.reapplyFixtures.push(entry)
-            } else if (entry.type === 'image') {
-              entry.apply = (node) => new Promise((resolve) => {
-                try {
-                  const { width, height } = deriveBoxDimensions(node)
-                  const placeholderSrc = buildInlinePlaceholder(width, height, 'Diffy image fixture')
-                  const currentSrc = node?.src || ''
-
-                  if (currentSrc === placeholderSrc) {
-                    resolve(false)
-                    return
-                  }
-
-                  node.src = placeholderSrc
-
-                  if (node.hasAttribute('data-src')) {
-                    node.setAttribute('data-src', placeholderSrc)
-                  }
-
-                  if (node.hasAttribute('srcset')) {
-                    node.setAttribute('srcset', `${placeholderSrc} 1x`)
-                  }
-
-                  try {
-                    node.setAttribute('data-diffy-fixture', 'image')
-                    node.setAttribute('data-diffy-fixture-size', `${width}x${height}`)
-                  } catch (_) {}
-
-                  if (typeof node.decode === 'function') {
-                    node.decode().catch(() => {})
-                  }
-
-                  resolve(true)
-                } catch (_) {
-                  resolve(false)
-                }
-              })
-            } else {
-              entry.apply = (node) => new Promise((resolve) => {
-                try {
-                  const { width, height } = deriveBoxDimensions(node)
-                  const placeholderSrc = buildInlinePlaceholder(width, height, 'Diffy background fixture')
-                  const currentBackground = node.style.backgroundImage || ''
-
-                  if (currentBackground.includes(placeholderSrc)) {
-                    resolve(false)
-                    return
-                  }
-
-                  node.style.backgroundImage = `url(${placeholderSrc})`
-                  try {
-                    node.setAttribute('data-diffy-fixture', 'background-image')
-                    node.setAttribute('data-diffy-fixture-size', `${width}x${height}`)
-                  } catch (_) {}
-
-                  resolve(true)
-                } catch (_) {
-                  resolve(false)
-                }
-              })
-            }
-
-            this.fixtures.push(entry)
-          },
-          applyFixture (entry, { recordMetrics = true } = {}) {
-            const nodes = Array.from(document.querySelectorAll(entry.selector))
-            if (!nodes.length) {
-              return Promise.resolve({ attempts: 0, applied: 0 })
-            }
-
-            const tasks = nodes.map((node) => {
               try {
-                const outcome = entry.apply(node)
-                return outcome && typeof outcome.then === 'function'
-                  ? outcome.then(Boolean)
-                  : Promise.resolve(Boolean(outcome))
-              } catch (_) {
-                return Promise.resolve(false)
-              }
-            })
-
-            return Promise.allSettled(tasks).then((results) => {
-              if (!recordMetrics) {
-                return { attempts: 0, applied: 0 }
-              }
-
-              let applied = 0
-              results.forEach((result) => {
-                if (result.status === 'fulfilled' && result.value) {
-                  applied += 1
-                }
-              })
-
-              return {
-                attempts: nodes.length,
-                applied,
-              }
-            })
-          },
-          applyAll ({ recordMetrics = true, reapplyOnly = false } = {}) {
-            const targets = reapplyOnly ? this.reapplyFixtures : this.fixtures
-            if (!targets.length) {
-              return Promise.resolve({ attempts: 0, applied: 0 })
-            }
-
-            const applies = targets.map((entry) => this.applyFixture(entry, { recordMetrics }))
-
-            return Promise.all(applies).then((results) => {
-              if (!recordMetrics) {
-                return { attempts: 0, applied: 0 }
-              }
-
-              return results.reduce((acc, result) => {
-                acc.attempts += result.attempts || 0
-                acc.applied += result.applied || 0
-                return acc
-              }, { attempts: 0, applied: 0 })
-            })
-          },
-          scheduleReapply () {
-            if (!this.reapplyFixtures.length || this.scheduled) {
-              return
-            }
-            this.scheduled = true
-            Promise.resolve().then(() => {
-              this.scheduled = false
-              this.applyAll({ recordMetrics: false, reapplyOnly: true }).catch(() => {})
-            })
-          },
-          activateObservers () {
-            if (!this.reapplyFixtures.length || typeof MutationObserver !== 'function') {
-              return
-            }
-            const target = document.documentElement || document.body
-            if (!target) {
-              return
-            }
-            const observer = new MutationObserver(() => {
-              if (this.isApplying()) {
-                return
-              }
-              this.scheduleReapply()
-            })
-            observer.observe(target, { childList: true, characterData: true, subtree: true })
-            this.observers.push(observer)
-          },
-          destroy () {
-            this.observers.forEach((observer) => {
-              try {
-                observer.disconnect()
+                el.src = placeholderSrc
               } catch (_) {}
-            })
-            this.observers = []
 
-            this.timers.forEach((handle) => {
-              clearTimeout(handle)
-            })
-            this.timers = []
+              if (el.hasAttribute('data-src')) {
+                el.setAttribute('data-src', placeholderSrc)
+              }
 
-            this.lockedMap.forEach((props, node) => {
-              props.forEach((prop) => {
-                try {
-                  delete node[prop]
-                } catch (_) {}
-              })
+              if (el.hasAttribute('srcset')) {
+                el.setAttribute('srcset', `${placeholderSrc} 1x`)
+              }
+
               try {
-                if (node.dataset) {
-                  delete node.dataset.diffyFixture
-                  delete node.dataset.diffyFixtureHash
-                }
+                el.setAttribute('data-diffy-fixture', 'image')
+                el.setAttribute('data-diffy-fixture-size', `${w}x${h}`)
               } catch (_) {}
-            })
-            this.lockedMap.clear()
 
-            this.fixtures = []
-            this.reapplyFixtures = []
-            this.applyingDepth = 0
-          },
-        }
+              if (typeof el.decode === 'function') {
+                el.decode().catch(() => {})
+              }
+              return resolve()
+            }
+          } catch (e) {}
 
-        window.__diffyFixtureManager = manager
-        return manager
-      }
-
-      const manager = ensureManager()
-      const normalizedFixtures = fixtures.filter((fixture) => fixture && typeof fixture.selector === 'string')
-
-      normalizedFixtures.forEach((fixture) => manager.registerFixture(fixture))
-
-      const metrics = await manager.applyAll({ recordMetrics: true })
-
-      if (manager.reapplyFixtures.length) {
-        manager.activateObservers()
-      }
-
-      if (Array.isArray(reapplyDelays) && reapplyDelays.length) {
-        reapplyDelays.forEach((delay) => {
-          const handle = setTimeout(() => {
-            manager.applyAll({ recordMetrics: false, reapplyOnly: true }).catch(() => {})
-          }, delay)
-          manager.timers.push(handle)
+          return resolve()
         })
       }
 
-      return {
-        attempts: metrics.attempts,
-        applied: metrics.applied,
-        persistWindowMs,
-        watchersActive: manager.reapplyFixtures.length > 0 && typeof MutationObserver === 'function',
-        fixtureCount: normalizedFixtures.length,
+      function diffyBackgroundImageFixture (el) {
+        return new Promise((resolve) => {
+          try {
+            const elStyle = el.currentStyle || window.getComputedStyle(el, false);
+            const backgroundImage = elStyle.backgroundImage.slice(4, -1).replace(/\"/g, '');
+
+            if (!backgroundImage) {
+              // No background image
+              return resolve()
+            }
+
+            getImageInfo(backgroundImage)
+              .then((imageInfo) => {
+                if (imageInfo.width && imageInfo.height) {
+                    const width = clampPositive(Math.round(imageInfo.width), 300);
+                    const height = clampPositive(Math.round(imageInfo.height), 200);
+                    const newBackgroundImageSrc = buildInlinePlaceholder(width, height, 'Diffy background fixture');
+                    const newBackgroundImage = new Image();
+                    newBackgroundImage.addEventListener('load', () => {
+                        el.style.backgroundImage = 'url(' + newBackgroundImageSrc + ')';
+                        try {
+                          el.setAttribute('data-diffy-fixture', 'background-image');
+                          el.setAttribute('data-diffy-fixture-size', `${width}x${height}`);
+                        } catch (_) {}
+                        resolve();
+                    });
+                    newBackgroundImage.addEventListener('error', () => {
+                        resolve();
+                    });
+
+                    // @TODO add timeout in case image is not loaded
+
+                    newBackgroundImage.src = newBackgroundImageSrc;
+                } else {
+                    resolve();
+                }
+              })
+              .catch(() => {
+                return resolve()
+              })
+          } catch (e) {
+            // console.error('Failed to diffy image fixture', e) // TODO: Prettify error dump
+
+            return resolve()
+          }
+        })
       }
-    }, {
-      fixtures: job.args.fixtures,
-      reapplyDelays,
-      persistWindowMs,
-    })
 
-    logger.debug('Diffy fixtures were added.', summary)
+      function getImageInfo (url) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject();
+          img.src = url;
+        });
+      }
 
+      function diffyTextFixture (el, content) {
+        return new Promise((resolve) => {
+          try {
+            el.innerHTML = content
+          } catch (e) {
+            // console.error('Failed to diffy text fixture', e) // TODO: Prettify error dump
+          }
+
+          return resolve()
+        })
+      }
+
+      const fixturePromises = []
+
+      for (let fixture of _fixtures) {
+        const selector = (fixture.selector) ? fixture.selector.trim() : ''
+        const type = (fixture.type) ? fixture.type.trim() : ''
+        const content = (fixture.content) ? fixture.content.trim() : ''
+
+        if (!selector.length) {
+          continue;
+        }
+
+        const element = document.querySelectorAll(selector)
+
+        if (!element) {
+          continue;
+        }
+
+        const elementKeys = Object.keys(element)
+
+        for (let i = 0; i < elementKeys.length; ++i) {
+          if (type === 'image') {
+            fixturePromises.push(diffyImageFixture(element[elementKeys[i]], selector))
+          } else if (type === 'background image') {
+            fixturePromises.push(diffyBackgroundImageFixture(element[elementKeys[i]]))
+          } else {
+            fixturePromises.push(diffyTextFixture(element[elementKeys[i]], content))
+          }
+        }
+      }
+
+      if (fixturePromises.length) {
+        return Promise.all(fixturePromises)
+      } else {
+        return Promise.resolve()
+      }
+
+    }, job.args.fixtures)
+
+    logger.debug('Diffy fixtures were added.')
+
+    await new Promise(resolve => setTimeout(resolve, 5000));
     return page
   },
 
