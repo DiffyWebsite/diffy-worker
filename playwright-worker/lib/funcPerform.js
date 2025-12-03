@@ -42,10 +42,11 @@ const handleIncapsula = async (page, maxRetries = 5) => {
         await page.keyboard.press('Tab');
         await page.evaluate(() => window.scrollBy(0, 100));
 
-        const cleared = await page.waitForFunction(
-            () => !document.querySelector('iframe#main-iframe'),
-            { timeout: 10000 }
-        ).catch(() => false);
+        const cleared = await pollUntil(page, () => !document.querySelector('iframe#main-iframe'), {
+          timeoutMs: 10000,
+          intervalMs: 200,
+          label: 'Incapsula iframe removal',
+        }).catch(() => false)
 
         if (cleared) {
           logger.info('Incapsula iframe cleared. Proceeding...');
@@ -170,14 +171,34 @@ const safeEval = async (page, fn, arg, label = 'evaluate') => {
   return page.evaluate(fn, arg)
 }
 
-const safeWaitForFunction = async (page, predicate, options, label = 'waitForFunction') => {
-  ensureOpen(page, label)
-  return page.waitForFunction(predicate, options)
-}
-
 const safeAddStyleTag = async (page, opts, label = 'addStyleTag') => {
   ensureOpen(page, label)
   return page.addStyleTag(opts)
+}
+
+const pollUntil = async (page, predicate, {
+  timeoutMs = 5000,
+  intervalMs = 200,
+  predicateArg,
+  label = 'condition',
+} = {}) => {
+  ensureOpen(page, label)
+  const endTime = Date.now() + timeoutMs
+
+  while (Date.now() < endTime) {
+    const result = await safeEval(page, predicate, predicateArg, `${label} evaluate`)
+    if (result) {
+      return true
+    }
+
+    const delay = Math.min(intervalMs, Math.max(0, endTime - Date.now()))
+    if (delay > 0) {
+      await page.waitForTimeout(delay)
+    }
+    ensureOpen(page, `${label} wait`)
+  }
+
+  throw new Error(`Timeout waiting for ${label}`)
 }
 
 const waitForFontFaces = async (page, {
@@ -278,20 +299,19 @@ const waitForVisualStability = async (page, {
 
   let imagesSettled = false
   try {
-    await safeWaitForFunction(
-        page,
-        () => Array.from(document.images || []).every((img) => {
-          if (!img) return true
-          if (!img.complete) return false
-          if (typeof img.naturalWidth === 'number') {
-            return img.naturalWidth > 0
-          }
-          const rect = img.getBoundingClientRect()
-          return rect.width > 0 && rect.height > 0
-        }),
-        { timeout: IMAGE_STABILITY_TIMEOUT_MS },
-        'images.complete wait'
-    )
+    await pollUntil(page, () => Array.from(document.images || []).every((img) => {
+      if (!img) return true
+      if (!img.complete) return false
+      if (typeof img.naturalWidth === 'number') {
+        return img.naturalWidth > 0
+      }
+      const rect = img.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    }), {
+      timeoutMs: IMAGE_STABILITY_TIMEOUT_MS,
+      intervalMs: 200,
+      label: 'images.complete wait',
+    })
     imagesSettled = true
   } catch (error) {
     logger.warn('Image load stabilization timed out', {
@@ -744,7 +764,11 @@ module.exports = {
         }
         logger.debug('page.goto done')
 
-        await safeWaitForFunction(page, () => document.readyState === 'complete', undefined, 'readyState complete');
+        await pollUntil(page, () => document.readyState === 'complete', {
+          timeoutMs: 30000,
+          intervalMs: 250,
+          label: 'readyState complete',
+        });
 
         const stabilitySummary = await waitForVisualStability(page)
         logger.debug('visual stabilization complete', stabilitySummary)
