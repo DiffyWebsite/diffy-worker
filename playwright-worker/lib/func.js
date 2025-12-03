@@ -169,16 +169,13 @@ const awaitResponse = async (page, timeout = 60000) => {
   ])
 }
 
-const USER_AGENT_POOL = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-]
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
 
 const buildHeaderState = (job) => {
   let userAgentString = pickUserAgentFromHeaders(job)
 
   if (!userAgentString.length) {
-    const randomIndex = Math.floor(Math.random() * USER_AGENT_POOL.length)
-    userAgentString = USER_AGENT_POOL[randomIndex]
+    userAgentString = USER_AGENT
   }
 
   const headers = {}

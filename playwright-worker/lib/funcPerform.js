@@ -464,8 +464,8 @@ module.exports = {
 
         const viewportWidth = parseInt(jobItem.breakpoint) || 800;
         const baseViewport = {width: viewportWidth, height: 1000};
-        const headerState = await func.setHeaders(null, jobItem);
-        const userAgentString = headerState?.userAgentString || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        const headerState = await func.buildHeaderState(jobItem);
+        const userAgentString = headerState.userAgentString
 
         const contextOptions = {
           viewport: baseViewport,
