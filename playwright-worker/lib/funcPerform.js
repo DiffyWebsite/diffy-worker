@@ -464,17 +464,18 @@ module.exports = {
 
         const viewportWidth = parseInt(jobItem.breakpoint) || 800;
         const baseViewport = {width: viewportWidth, height: 1000};
-        const headerConfig = func.buildHeaderConfig(jobItem);
+        const headerState = await func.setHeaders(null, jobItem);
+        const userAgentString = headerState?.userAgentString || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
 
         const contextOptions = {
           viewport: baseViewport,
           bypassCSP: true,
           ignoreHTTPSErrors: true,
-          userAgent: headerConfig.userAgent,
+          userAgent: userAgentString,
           deviceScaleFactor: (Object.hasOwn(jobItem.args, 'retina_images') && jobItem.args.retina_images) ? 2 : 1,
-          locale: headerConfig.locale,
-          timezoneId: headerConfig.timezoneId,
-          hasTouch: (headerConfig.clientHints?.maxTouchPoints ?? 0) > 1,
+          locale: 'en-US',
+          timezoneId: 'UTC',
+          hasTouch: false,
         };
 
         if (
@@ -489,7 +490,7 @@ module.exports = {
         }
 
         context = await browser.newContext(contextOptions);
-        await func.setHeaders(context, jobItem, headerConfig);
+        await func.setHeaders(context, jobItem, headerState);
         page = await context.newPage();
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {

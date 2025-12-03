@@ -7,11 +7,6 @@ const crypto = require('crypto')
 const sharp = require('sharp')
 const logger = require('./logger')
 
-const DEFAULT_ACCEPT_HEADER = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
-const DEFAULT_ACCEPT_LANGUAGE = 'en-US,en;q=0.9'
-const DEFAULT_CLIENT_HINT_PLATFORM = '"Windows"'
-const DEFAULT_LANGUAGES = ['en-US', 'en']
-
 const describeError = (err) => {
   if (!err) {
     return 'unknown error'
@@ -36,117 +31,22 @@ const ensurePageOpen = (page, label = 'operation') => {
   }
 }
 
-const PRIMARY_BROWSER_PROFILE = {
-  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.85 Safari/537.36',
-  locale: 'en-US',
-  languages: ['en-US', 'en'],
-  timezoneId: 'America/New_York',
-  platform: 'Windows',
-  hardwareConcurrency: 12,
-  deviceMemory: 8,
-  devicePixelRatio: 1.25,
-  brands: [
-    { brand: 'Not_A Brand', version: '8' },
-    { brand: 'Chromium', version: '131' },
-    { brand: 'Google Chrome', version: '131' }
-  ],
-  platformVersion: '15.0.0',
-  architecture: 'x86',
-  bitness: '64',
-  maxTouchPoints: 1,
-  webglVendor: 'Google Inc. (NVIDIA)',
-  webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Ti Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)'
-}
-
-const buildAcceptLanguageHeader = (languages = DEFAULT_LANGUAGES) => {
-  if (!languages?.length) {
-    return DEFAULT_ACCEPT_LANGUAGE
+const pickUserAgentFromHeaders = (job) => {
+  if (!checkArgs(job, 'headers', true)) {
+    return ''
   }
 
-  return languages
-    .map((lang, index) => {
-      if (index === 0) return lang
-      const quality = Math.max(0.1, 1 - index * 0.1).toFixed(1)
-      return `${lang};q=${quality}`
-    })
-    .join(', ')
-}
+  const userAgentHeader = job.args.headers.filter(item => {
+    return (Object.hasOwn(item, 'header') && item.header && item.header.toLowerCase() === 'user-agent')
+  })
 
-const parseChromeVersions = (userAgent) => {
-  if (!userAgent || typeof userAgent !== 'string') {
-    return { major: null, full: null }
+  if (userAgentHeader && userAgentHeader.length) {
+    if (Object.hasOwn(userAgentHeader[0], 'value') && userAgentHeader[0].value.length) {
+      return userAgentHeader[0].value
+    }
   }
 
-  const fullMatch = userAgent.match(/Chrome\/([\d.]+)/)
-  const majorMatch = userAgent.match(/Chrome\/(\d+)/)
-
-  return {
-    major: majorMatch ? majorMatch[1] : null,
-    full: fullMatch ? fullMatch[1] : null,
-  }
-}
-
-const buildClientHintHeaders = (metadata) => {
-  const brands = metadata.brands?.length ? metadata.brands : [
-    { brand: 'Not_A Brand', version: '8' },
-    { brand: 'Chromium', version: '120' },
-    { brand: 'Google Chrome', version: '120' },
-  ]
-
-  const formatBrands = (collection) => collection
-    .map(({ brand, version }) => `"${brand}";v="${version}"`)
-    .join(', ')
-
-  return {
-    'Sec-CH-UA': formatBrands(brands),
-    'Sec-CH-UA-Full-Version-List': formatBrands(brands),
-    'Sec-CH-UA-Mobile': metadata.mobile ? '?1' : '?0',
-    'Sec-CH-UA-Platform': `"${metadata.platform || DEFAULT_CLIENT_HINT_PLATFORM.replace(/"/g, '')}"`,
-    'Sec-CH-UA-Platform-Version': metadata.platformVersion ? `"${metadata.platformVersion}"` : undefined,
-    'Sec-CH-UA-Arch': metadata.architecture ? `"${metadata.architecture}"` : undefined,
-    'Sec-CH-UA-Bitness': metadata.bitness ? `"${metadata.bitness}"` : undefined,
-  }
-}
-
-const buildClientHintMetadata = (userAgent, profile = null) => {
-  const { major, full } = parseChromeVersions(userAgent)
-  const version = major || profile?.brands?.[1]?.version || '120'
-  const fullVersion = full || `${version}.0.0.0`
-
-  return {
-    brands: profile?.brands?.length ? profile.brands : [
-      { brand: 'Not_A Brand', version: '8' },
-      { brand: 'Chromium', version },
-      { brand: 'Google Chrome', version },
-    ],
-    platform: profile?.platform || DEFAULT_CLIENT_HINT_PLATFORM.replace(/"/g, ''),
-    platformVersion: profile?.platformVersion || '15.0.0',
-    mobile: Boolean(profile?.mobile ?? false),
-    uaFullVersion: fullVersion,
-    hardwareConcurrency: profile?.hardwareConcurrency || 8,
-    deviceMemory: profile?.deviceMemory || 8,
-    languages: profile?.languages || DEFAULT_LANGUAGES,
-    architecture: profile?.architecture || 'x86',
-    bitness: profile?.bitness || '64',
-    maxTouchPoints: profile?.maxTouchPoints ?? (profile?.mobile ? 5 : 1),
-    devicePixelRatio: profile?.devicePixelRatio || 1,
-    locale: profile?.locale || DEFAULT_LANGUAGES[0],
-    timezoneId: profile?.timezoneId || 'UTC',
-    webglVendor: profile?.webglVendor,
-    webglRenderer: profile?.webglRenderer,
-  }
-}
-
-const ensureHeader = (headers, name, value) => {
-  if (!headers) {
-    return
-  }
-
-  const existing = Object.keys(headers).find((headerName) => headerName.toLowerCase() === name.toLowerCase())
-
-  if (!existing || headers[existing] === undefined || headers[existing] === null || headers[existing] === '') {
-    headers[name] = value
-  }
+  return ''
 }
 
 const checkArgs = (obj, field, checkLength = false) => {
@@ -269,46 +169,20 @@ const awaitResponse = async (page, timeout = 60000) => {
   ])
 }
 
-const buildHeaderConfig = (job) => {
-  const headers = {}
-  let profile = null
-  let userAgentString = ''
+const USER_AGENT_POOL = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+]
 
-  if (checkArgs(job, 'headers', true)) {
-    const userAgentHeader = job.args.headers.find(item => {
-      return (Object.hasOwn(item, 'header') && item.header && item.header.toLowerCase() === 'user-agent')
-    })
-
-    if (userAgentHeader && Object.hasOwn(userAgentHeader, 'value') && userAgentHeader.value.length) {
-      userAgentString = userAgentHeader.value
-    }
-  }
+const buildHeaderState = (job) => {
+  let userAgentString = pickUserAgentFromHeaders(job)
 
   if (!userAgentString.length) {
-    // Use a single, consistent profile for stable VRT runs.
-    profile = PRIMARY_BROWSER_PROFILE
-    userAgentString = profile.userAgent
-  } else {
-    profile = {
-      locale: DEFAULT_LANGUAGES[0],
-      languages: DEFAULT_LANGUAGES,
-      timezoneId: 'UTC',
-      platform: DEFAULT_CLIENT_HINT_PLATFORM.replace(/"/g, ''),
-      hardwareConcurrency: 8,
-      deviceMemory: 8,
-      brands: null,
-      architecture: 'x86',
-      bitness: '64',
-      devicePixelRatio: 1,
-      maxTouchPoints: 1,
-    }
+    const randomIndex = Math.floor(Math.random() * USER_AGENT_POOL.length)
+    userAgentString = USER_AGENT_POOL[randomIndex]
   }
 
-  if (userAgentString.length) {
-    logger.debug('User-Agent: "' + userAgentString + '"')
-  }
-
-  if (job.args.headers) {
+  const headers = {}
+  if (job?.args?.headers) {
     job.args.headers.forEach(element => {
       if (element.header && element.header.trim().length) {
         headers[element.header] = element.value
@@ -316,41 +190,12 @@ const buildHeaderConfig = (job) => {
     })
   }
 
-  ensureHeader(headers, 'Accept', DEFAULT_ACCEPT_HEADER)
-  ensureHeader(headers, 'Accept-Language', buildAcceptLanguageHeader(['en-US','en']))
-  ensureHeader(headers, 'Upgrade-Insecure-Requests', '1')
-
-  // Build consistent Client Hints: fixed platform/versions derived from locked profile
-  const clientHints = buildClientHintMetadata(userAgentString, {
-    ...profile,
-    locale: 'en-US',
-    languages: ['en-US','en'],
-    timezoneId: 'UTC',
-  })
-  const clientHintHeaders = buildClientHintHeaders(clientHints)
-  Object.entries(clientHintHeaders)
-    .filter(([, value]) => value !== undefined)
-    .forEach(([name, value]) => ensureHeader(headers, name, value))
-
   if (job.url && job.url.includes('pantheonsite.io')) {
     headers['Deterrence-Bypass'] = '1'
     logger.debug('Deterrence-Bypass set')
   }
 
-  return {
-    userAgent: userAgentString,
-    extraHeaders: headers,
-    clientHints,
-    locale: 'en-US',
-    languages: ['en-US','en'],
-    timezoneId: 'UTC',
-  }
-}
-
-const applyHeadersToContext = async (context, headerConfig) => {
-  if (headerConfig?.extraHeaders && Object.keys(headerConfig.extraHeaders).length) {
-    await context.setExtraHTTPHeaders(headerConfig.extraHeaders)
-  }
+  return { userAgentString, headers }
 }
 
 module.exports = {
@@ -1037,10 +882,6 @@ module.exports = {
     return random(min, max)
   },
 
-  buildHeaderConfig: (job) => {
-    return buildHeaderConfig(job)
-  },
-
   handleCloudflareChallenge: async (page, options = {}) => {
     return handleCloudflareChallenge(page, options)
   },
@@ -1062,10 +903,22 @@ module.exports = {
   //   fs.emptyDirSync(tmp)
   // },
 
-  setHeaders: async (context, job, precomputedConfig = null) => {
-    const headerConfig = precomputedConfig ?? buildHeaderConfig(job)
-    await applyHeadersToContext(context, headerConfig)
-    return headerConfig
+  setHeaders: async (context, job, preparedState = null) => {
+    let state = preparedState
+
+    if (!state) {
+      state = buildHeaderState(job)
+
+      if (state.userAgentString.length) {
+        logger.debug('User-Agent: "' + state.userAgentString + '"')
+      }
+    }
+
+    if (context && state.headers && Object.keys(state.headers).length) {
+      await context.setExtraHTTPHeaders(state.headers)
+    }
+
+    return state
   },
 
   cropElement: async (page, job) => {
