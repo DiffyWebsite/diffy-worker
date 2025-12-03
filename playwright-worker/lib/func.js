@@ -918,6 +918,10 @@ module.exports = {
     return state
   },
 
+  buildHeaderState: (job) => {
+    return buildHeaderState(job)
+  },
+
   cropElement: async (page, job) => {
     if (!checkArgs(job, 'crop')) {
       return Promise.resolve()
