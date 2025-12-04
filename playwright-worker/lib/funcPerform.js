@@ -618,27 +618,19 @@ module.exports = {
           });
         }
 
-        const defaultBlockedHosts = [
-          'www.google-analytics.com', 'analytics.google.com', 'ssl.google-analytics.com',
-          'www.googletagmanager.com', 'googletagmanager.com', 'www.googletagservices.com',
-          'connect.facebook.net', 'static.hotjar.com', 'script.hotjar.com', 'cdn.segment.com',
-          'api.segment.io', 'static.ads-twitter.com', 'bat.bing.com', 'cdn.fullstory.com',
-          'rs.fullstory.com', 'snap.licdn.com', 'cdn.heapanalytics.com', 'js.intercomcdn.com',
-          'widget.intercom.io', 'hs-analytics.net', 'hs-scripts.com', 'googlesyndication.com',
-          'doubleclick.net'
-        ];
-
         const shouldBlockRequest = (urlString) => {
+          if (!callRailBlockEnabled) {
+            return false;
+          }
           try {
             const parsed = new URL(urlString);
             if (callRailBlockEnabled && /swap_session\.json/i.test(parsed.pathname)) {
               return true;
             }
-
-            return defaultBlockedHosts.some((host) => parsed.host.endsWith(host));
           } catch (_) {
             return false;
           }
+          return false;
         };
 
         await page.route('**/*', (route) => {
@@ -779,6 +771,7 @@ module.exports = {
 
         const fontReadyInitial = await waitForFontFaces(page)
         logger.debug('font readiness after initial stabilization', fontReadyInitial)
+        await page.waitForTimeout(1000)
 
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
         await safeEval(page, () => {
@@ -1109,6 +1102,7 @@ module.exports = {
           quietWindowMs: Math.max(LAYOUT_STABILITY_DEFAULT_QUIET_WINDOW_MS, 400),
         })
         const fontReadyFinal = await waitForFontFaces(page)
+        await page.waitForTimeout(1000)
 
         logger.debug('post-scroll visual stabilization complete', {
           postScrollStability,
