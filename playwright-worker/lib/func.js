@@ -81,6 +81,8 @@ const updatePageViewport = async (page, job, maxPageHeight = null) => {
       width: Number.parseInt(job.breakpoint, 10),
       height: Number.parseInt(scrollHeight, 10)
     })
+    // Allow Chromium to finish reflowing before we continue manipulating the page
+    await page.waitForTimeout(1000)
   } catch (err) {
     if (isTargetClosureError(err)) {
       throw new Error(`Target closed during updatePageViewport resize: ${describeError(err)}`)
@@ -288,6 +290,7 @@ module.exports = {
       logger.warn('Failed to evaluate page', { error: e, js_code: job.args.js_code })
     }
 
+    await page.waitForTimeout(2000)
     return page
   },
 
@@ -302,6 +305,7 @@ module.exports = {
       logger.error('Failed to add style tag', { error: e, css_code: job.args.css_code });
     }
 
+    await page.waitForTimeout(2000)
     return page;
   },
 

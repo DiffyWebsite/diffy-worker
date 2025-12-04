@@ -314,7 +314,8 @@ const waitForVisualStability = async (page, {
     })
     imagesSettled = true
   } catch (error) {
-    logger.warn('Image load stabilization timed out', {
+    // Treat image stabilization as best-effort so we don't spam warnings when lazy images keep loading
+    logger.debug('Image load stabilization skipped', {
       timeoutMs: IMAGE_STABILITY_TIMEOUT_MS,
       error: error?.message || String(error),
     })
@@ -763,6 +764,7 @@ module.exports = {
 
         if (!page.isClosed()) {
           await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 1000})
+          await page.waitForTimeout(1000)
         }
         logger.debug('page.goto done')
 
@@ -772,7 +774,7 @@ module.exports = {
           label: 'readyState complete',
         });
 
-        const stabilitySummary = await waitForVisualStability(page)
+        const stabilitySummary = await waitForVisualStability(page, { waitForFonts: true })
         logger.debug('visual stabilization complete', stabilitySummary)
 
         const fontReadyInitial = await waitForFontFaces(page)
@@ -1038,6 +1040,7 @@ module.exports = {
           // We need decrease height after cut.
           if (!page.isClosed()) {
             await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 100})
+            await page.waitForTimeout(1000)
             await func.updatePageViewport(page, jobItem, maxPageHeight)
           }
         }
@@ -1052,6 +1055,7 @@ module.exports = {
         // Recalculate page height after modifications.
         if (!page.isClosed()) {
           await page.setViewportSize({width: parseInt(jobItem.breakpoint), height: 100})
+          await page.waitForTimeout(1000)
           await func.updatePageViewport(page, jobItem, maxPageHeight)
         }
 
