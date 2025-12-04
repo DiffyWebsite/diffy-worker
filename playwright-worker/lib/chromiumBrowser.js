@@ -38,6 +38,7 @@ class ChromiumBrowser {
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
       '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-font-subpixel-positioning',
     ];
     this.launchProfile = createLaunchProfile();
     this.localExecutivePath = '/usr/bin/chromium-browser';
