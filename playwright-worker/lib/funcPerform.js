@@ -993,17 +993,16 @@ module.exports = {
             const stabilizeHeight = async (elementsHeights, level) => {
               for (const element of elementsHeights) {
                 if (document.body.contains(element.node)) {
+                  const recordedHeight = Number(element.height) || 0
+                  const currentHeight = element.node.offsetHeight || 0
+
                   if (
-                      element.height !== element.node.offsetHeight &&
+                      recordedHeight > 0 &&
+                      currentHeight < recordedHeight &&
                       element.viewportRatio >= 0.40
                   ) {
-                    element.node.style.height = element.height + 'px'
-                    element.node.style.maxHeight = element.height + 'px'
-                    element.node.style.minHeight = element.height + 'px'
-
-                    if (element.node.scrollHeight === element.node.offsetHeight) {
-                      continue
-                    }
+                    element.node.style.height = recordedHeight + 'px'
+                    element.node.style.minHeight = recordedHeight + 'px'
                   }
 
                   if (element.childNodes.length) {
