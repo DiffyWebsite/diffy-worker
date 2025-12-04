@@ -474,7 +474,7 @@ module.exports = {
       attempt++
 
       let data = {};
-      let context;
+      let pageContext;
       let page;
       let jsConsole = [];
       const maxPageHeightIfError = 50000;
@@ -509,15 +509,15 @@ module.exports = {
           };
         }
 
-        context = await browser.newContext(contextOptions);
-        await func.setHeaders(context, jobItem, headerState);
-        page = await context.newPage();
+        page = await browser.newPage(contextOptions);
+        pageContext = page.context();
+        await func.setHeaders(pageContext, jobItem, headerState);
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
           await page.emulateMedia({colorScheme: 'dark'});
         }
 
-        logger.debug('browser.newContext', {jobItem})
+        logger.debug('browser.newPage', {jobItem})
 
         await page.setDefaultNavigationTimeout(90000)
         await page.setDefaultTimeout(30000)
@@ -543,7 +543,9 @@ module.exports = {
           jsConsole.push(consoleMes)
         })
 
-        await context.clearCookies();
+        if (pageContext) {
+          await pageContext.clearCookies();
+        }
         logger.debug('setHeaders prepared', {
           userAgent: userAgentString,
           extraHeaders: headerState?.headers || {}
@@ -690,8 +692,8 @@ module.exports = {
           cookies = cookies.concat(authCookies)
         }
 
-        if (cookies?.length) {
-          await context.addCookies(cookies)
+        if (cookies?.length && pageContext) {
+          await pageContext.addCookies(cookies)
         }
 
         let response;
@@ -1161,11 +1163,6 @@ module.exports = {
         logger.debug('page close done')
         page = null
 
-        if (context) {
-          await context.close();
-          logger.debug('context close done');
-          context = null;
-        }
 
         // check webp format
         const screenshotSize = await func.getImageSize(filename)
@@ -1286,14 +1283,6 @@ module.exports = {
           page = null
         }
 
-        if (context) {
-          try {
-            await context.close()
-          } catch (e) {
-            logger.error('Failed to close context', {error: e})
-          }
-          context = null
-        }
 
         // Retry once for transient target/session closed errors
         const msg = (err && Object.hasOwn(err, 'message')) ? err.message : err.toString()

@@ -1,30 +1,30 @@
-const fs = require('fs');
-const crypto = require('crypto');
 const { anonymizeProxy, closeAnonymizedProxy } = require('proxy-chain');
 const { chromium } = require('playwright');
 const logger = require('./logger');
 
 /**
  * @typedef {import('playwright').Browser} Browser
- * @typedef {import('playwright').BrowserContext} BrowserContext
- * @typedef {import('playwright').BrowserContextOptions} BrowserContextOptions
  */
 
-const randomBetween = (min, max) => crypto.randomInt(min, max + 1);
-
-const realisticViewports = [
-  { width: 1366, height: 768 },
-  { width: 1440, height: 900 },
-  { width: 1536, height: 864 },
-  { width: 1600, height: 900 },
-  { width: 1920, height: 1080 },
+const DEFAULT_VIEWPORT = { width: 1366, height: 768 };
+const BASE_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-web-security',
+  '--disable-features=IsolateOrigins,site-per-process',
+  '--disable-features=TranslateUI',
+  '--disable-extensions',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-dev-shm-usage',
+  '--disable-client-side-phishing-detection',
+  '--ignore-certificate-errors',
+  '--js-flags=--max-old-space-size=2048',
+  '--autoplay-policy=user-gesture-required',
+  '--disable-font-subpixel-positioning',
+  '--disable-blink-features=AutomationControlled',
+  `--window-size=${DEFAULT_VIEWPORT.width},${DEFAULT_VIEWPORT.height}`,
 ];
-
-const createLaunchProfile = () => {
-  const viewport = realisticViewports[randomBetween(0, realisticViewports.length - 1)];
-  const args = [`--window-size=${viewport.width},${viewport.height}`];
-  return { viewport, args };
-};
 
 class ChromiumBrowser {
   constructor(debug = false, local = false) {
@@ -32,22 +32,12 @@ class ChromiumBrowser {
     this.local = local;
     this.browser = null;
     this.anonymizedProxy = null;
-    this.staticArgs = [
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--disable-font-subpixel-positioning',
-    ];
-    this.launchProfile = createLaunchProfile();
+    this.staticArgs = BASE_ARGS;
     this.localExecutivePath = '/usr/bin/chromium-browser';
   }
 
   async getBrowser(proxy) {
-    this.launchProfile = createLaunchProfile();
-
-    const launchArgs = Array.from(new Set([...this.staticArgs, ...this.launchProfile.args]));
+    const launchArgs = [...this.staticArgs];
 
     const launchOptions = {
       args: launchArgs,
@@ -71,26 +61,6 @@ class ChromiumBrowser {
 
     this.browser = await chromium.launch(launchOptions);
     return this.browser;
-  }
-
-  /**
-   * Create a fresh context with the chosen viewport and sensible defaults.
-   */
-  async newContext(options = {}) {
-    if (!this.browser) throw new Error('Browser not launched. Call getBrowser() first.');
-    const ctx = await this.browser.newContext({
-      viewport: this.launchProfile.viewport,
-      deviceScaleFactor: 1,
-      ignoreHTTPSErrors: true,
-      timezoneId: 'Europe/Chisinau',
-      locale: 'en-US',
-      ...options,
-    });
-    // Apply sane default timeouts so actions and navigations are bounded.
-    // Keep these internal (no exposure via job args as requested).
-    ctx.setDefaultTimeout(30000);
-    ctx.setDefaultNavigationTimeout(45000);
-    return ctx;
   }
 
   async closeProxy() {
