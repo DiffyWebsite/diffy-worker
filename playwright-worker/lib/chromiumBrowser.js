@@ -2,28 +2,13 @@ const { anonymizeProxy, closeAnonymizedProxy } = require('proxy-chain');
 const { chromium } = require('playwright');
 const logger = require('./logger');
 
-/**
- * @typedef {import('playwright').Browser} Browser
- */
-
-const DEFAULT_VIEWPORT = { width: 1366, height: 768 };
 const BASE_ARGS = [
   '--no-sandbox',
-  '--disable-setuid-sandbox',
-  '--disable-web-security',
-  '--disable-features=IsolateOrigins,site-per-process',
-  '--disable-features=TranslateUI',
-  '--disable-extensions',
-  '--disable-background-timer-throttling',
-  '--disable-renderer-backgrounding',
+  '--disable-gpu',
   '--disable-dev-shm-usage',
-  '--disable-client-side-phishing-detection',
-  '--ignore-certificate-errors',
-  '--js-flags=--max-old-space-size=2048',
-  '--autoplay-policy=user-gesture-required',
-  '--disable-font-subpixel-positioning',
   '--disable-blink-features=AutomationControlled',
-  `--window-size=${DEFAULT_VIEWPORT.width},${DEFAULT_VIEWPORT.height}`,
+  '--disable-features=IsolateOrigins,site-per-process',
+  '--disable-font-subpixel-positioning',
 ];
 
 class ChromiumBrowser {
