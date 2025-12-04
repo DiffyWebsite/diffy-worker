@@ -795,194 +795,14 @@ module.exports = {
 
         const stabilizationEnabled = Boolean(Object.hasOwn(jobItem.args, 'stabilization') && jobItem.args.stabilization)
 
-        if (stabilizationEnabled) {
-          await (async () => {
-            await page.evaluate(async () => {
-              // Batch style modifications to remove animations, transitions, and manage heights.
-              const pageStyle = document.createElement('style');
-              pageStyle.textContent = `
-                  *, *::before, *::after {
-                      animation: none !important;
-                      transition: none !important;
-                      caret-color: transparent !important;
-                      color-adjust: exact !important;
-                  }
-                  html.pum-open { overflow: auto !important; }
-                  .pum-overlay, #CybotCookiebotDialog, #velaro-container, iframe[title="reCAPTCHA"], 
-                  #hs-eu-cookie-confirmation, #onetrust-consent-sdk, .cookie-notice-overlay {
-                      display: none !important;
-                  }
-              `;
-              document.head.appendChild(pageStyle);
-
-              // Pause and reset videos
-              document.querySelectorAll('video').forEach(video => {
-                try {
-                  video.pause();
-                  video.currentTime = 0;
-
-                  video.play = () => {
-                    return Promise.resolve();
-                  };
-                } catch (e) {
-                }
-              });
-
-              // Destroy jarallax if present
-              if (typeof window.jarallax !== 'undefined') {
-                try {
-                  window.jarallax(document.querySelectorAll('.jarallax'), 'destroy');
-                } catch (e) {
-                }
-              }
-
-              // Stop swiper autoplay and reset
-              document.querySelectorAll('.swiper, .swiper-container').forEach(element => {
-                if (element.swiper) {
-                  try {
-                    element.swiper.autoplay.stop();
-                    element.swiper.slideTo(0, 0);
-                    element.swiper.setProgress(0, 0);
-                  } catch (e) {
-                  }
-                }
-              });
-
-              // Stabilize Slick sliders by halting autoplay and forcing first slide
-              document.querySelectorAll('.slick-slider').forEach((slider) => {
-                const forceFirstSlide = () => {
-                  const track = slider.querySelector('.slick-track');
-                  if (track) {
-                    track.style.transitionDuration = '0ms';
-                    track.style.transitionProperty = 'none';
-                    track.style.transform = 'translate3d(0px, 0px, 0px)';
-                  }
-
-                  const slides = slider.querySelectorAll('.slick-slide');
-                  slides.forEach((slide, index) => {
-                    const isFirst = index === 0;
-                    slide.classList.toggle('slick-current', isFirst);
-                    slide.classList.toggle('slick-active', isFirst);
-                    slide.setAttribute('aria-hidden', (!isFirst).toString());
-                    slide.style.transitionDuration = '0ms';
-                    slide.style.transitionProperty = 'none';
-                  });
-
-                  slider.querySelectorAll('.slick-dots li').forEach((dot, index) => {
-                    dot.classList.toggle('slick-active', index === 0);
-                  });
-                };
-
-                try {
-                  const instance = slider && slider.slick;
-
-                  if (instance) {
-                    const setOption = instance.slickSetOption || instance.setOption;
-                    if (typeof setOption === 'function') {
-                      setOption.call(instance, 'speed', 0, true);
-                      setOption.call(instance, 'autoplay', false, true);
-                    }
-
-                    const goTo = instance.slickGoTo || instance.goTo || instance.slideHandler;
-                    if (typeof goTo === 'function') {
-                      goTo.call(instance, 0, true);
-                    }
-
-                    const pause = instance.slickPause || instance.pause || instance.autoPlayClear;
-                    if (typeof pause === 'function') {
-                      pause.call(instance);
-                    } else if (instance.autoPlayTimer) {
-                      clearInterval(instance.autoPlayTimer);
-                      instance.autoPlayTimer = null;
-                    }
-                  } else {
-                    forceFirstSlide();
-                  }
-                } catch (e) {
-                  forceFirstSlide();
-                }
-              });
-
-              // Stop Vimeo videos
-              if (typeof Vimeo !== 'undefined') {
-                document.querySelectorAll('iframe[src*="vimeo"]').forEach(iframe => {
-                  try {
-                    new Vimeo.Player(iframe).destroy();
-                  } catch (e) {
-                  }
-                });
-              }
-
-              // Stop YouTube videos
-              document.querySelectorAll('iframe[src*="youtube"]').forEach(iframe => {
-                try {
-                  iframe.contentWindow.postMessage('{"event":"command","func":"stopVideo","args":""}', '*');
-                } catch (e) {
-                }
-              });
-
-              // Shut down Intercom if available
-              if (typeof Intercom !== 'undefined') {
-                try {
-                  Intercom('shutdown');
-                } catch (e) {
-                }
-              }
-
-              // Stop Presto player
-              document.querySelectorAll('presto-player').forEach(el => {
-                try {
-                  el.stop();
-                } catch (e) {
-                }
-              });
-
-              // Hide unwanted banners and popups
-              document.querySelectorAll('#CybotCookiebotDialog, #velaro-container, iframe[title="reCAPTCHA"], #hs-eu-cookie-confirmation, #onetrust-consent-sdk, .cookie-notice-overlay, .pum-overlay, .cky-consent-container').forEach(el => {
-                el.remove();
-              });
-            });
-
-            // Hide YouTube iframe videos that could cause layout instability
-            await func.hideBanners(page, { args: { elements: ['iframe[src*="youtube.com"]', 'lite-youtube'] } });
-
-            await page.evaluate(async () => {
-              // Record and stabilize element heights
-              window.diffyElementsHeights = [];
-
-              await (async function traverse(node, elementsHeights) {
-                const viewportHeight = window.innerHeight;
-
-                if (viewportHeight && node.childNodes.length) {
-                  for (const child of node.childNodes) {
-                    if (child.nodeType === Node.ELEMENT_NODE) {
-                      if (
-                        !child.offsetHeight ||
-                        window.getComputedStyle(child).getPropertyValue('opacity') <= 0 ||
-                        ['script', 'noscript', 'input', 'br', 'hr'].includes(child.tagName.toLowerCase())
-                      ) {
-                        continue;
-                      }
-
-                      const element = {
-                        node: child,
-                        height: child.offsetHeight,
-                        viewportRatio: (child.offsetHeight / viewportHeight).toFixed(2),
-                        childNodes: [],
-                      };
-
-                      elementsHeights.push(element);
-
-                      // Traverse deeper if there are child nodes
-                      if (child.childNodes && child.childNodes.length) {
-                        await traverse(child, element.childNodes);
-                      }
-                    }
-                  }
-                }
-              })(document.body, window.diffyElementsHeights);
-            });
-          })();
+        if (stabilizationEnabled && Object.hasOwn(jobItem.args, 'stabilization_code') && jobItem.args.stabilization_code) {
+          try {
+            await (async () => {
+              await eval(jobItem.args.stabilization_code);
+            })();
+          } catch (error) {
+            logger.warn('stabilization_code execution failed', { error: error?.message || String(error) })
+          }
         }
 
         const initialViewportHeight = await func.updatePageViewport(page, jobItem, maxPageHeight)
@@ -990,19 +810,21 @@ module.exports = {
 
         if (stabilizationEnabled) {
           await page.evaluate(async () => {
+
             const stabilizeHeight = async (elementsHeights, level) => {
               for (const element of elementsHeights) {
                 if (document.body.contains(element.node)) {
-                  const recordedHeight = Number(element.height) || 0
-                  const currentHeight = element.node.offsetHeight || 0
-
                   if (
-                      recordedHeight > 0 &&
-                      currentHeight < recordedHeight &&
+                      element.height !== element.node.offsetHeight &&
                       element.viewportRatio >= 0.40
                   ) {
-                    element.node.style.height = recordedHeight + 'px'
-                    element.node.style.minHeight = recordedHeight + 'px'
+                    element.node.style.height = element.height + 'px'
+                    element.node.style.maxHeight = element.height + 'px'
+                    element.node.style.minHeight = element.height + 'px'
+
+                    if (element.node.scrollHeight === element.node.offsetHeight) {
+                      continue
+                    }
                   }
 
                   if (element.childNodes.length) {
