@@ -209,42 +209,21 @@ module.exports = {
 
     let scrollHeight = 0;
     let totalHeight = 0;
-    const maxIterations = 250;
-    const startTime = Date.now();
-    const maxDurationMs = 45 * 1000;
 
-    let iteration;
-    for (iteration = 0; iteration < maxIterations; iteration++) {
+    do {
       await page.waitForSelector('body');
       scrollHeight = await page.evaluate('document.body.scrollHeight');
+
+      await page.waitForSelector('body');
       await page.evaluate('window.scrollBy(0, 100)');
       totalHeight += 100;
 
-      if (totalHeight >= scrollHeight) {
-        break;
-      }
-
-      if ((Date.now() - startTime) > maxDurationMs) {
-        logger.warn('autoScroll aborted: reached duration cap', {
-          iterations: iteration + 1,
-          elapsedMs: Date.now() - startTime,
-          scrollHeight,
-        });
-        break;
-      }
-    }
-
-    if (totalHeight < scrollHeight) {
-      logger.warn('autoScroll exited before reaching bottom', {
-        iterations: iteration,
-        totalHeight,
-        scrollHeight,
-      });
-    }
+      await page.waitForTimeout(100);
+    } while (totalHeight < scrollHeight)
 
     try {
       await page.evaluate('window.scrollTo(0, 0)');
-      // also no timeout here
+      await page.waitForTimeout(500);
     } catch (e) {}
 
     return Promise.resolve();
