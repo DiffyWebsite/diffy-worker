@@ -209,7 +209,6 @@ module.exports = {
       attempt++
 
       let data = {};
-      let pageContext;
       let page;
       let jsConsole = [];
       const maxPageHeightIfError = 50000;
@@ -218,11 +217,17 @@ module.exports = {
         const maxPageHeight = (Object.hasOwn(job, 'attempts') && job.attempts > 0) ? (maxPageHeightIfError / job.attempts) : maxPageHeightIfError
 
         const viewportWidth = parseInt(jobItem.breakpoint) || 800;
-        const baseViewport = {width: viewportWidth, height: 1000};
+        const baseViewport = { width: viewportWidth, height: 1000 };
         const headerState = await func.buildHeaderState(jobItem);
-        const userAgentString = headerState.userAgentString
+        const userAgentString = headerState.userAgentString;
 
-        const contextOptions = {
+        const hasBasicAuth = (
+            Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
+            Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
+            Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password
+        );
+
+        page = await browser.newPage({
           viewport: baseViewport,
           bypassCSP: true,
           ignoreHTTPSErrors: true,
@@ -231,22 +236,16 @@ module.exports = {
           locale: 'en-US',
           timezoneId: 'UTC',
           hasTouch: false,
-        };
+          ...(hasBasicAuth ? {
+            httpCredentials: {
+              username: jobItem.basicAuth.user,
+              password: jobItem.basicAuth.password,
+            }
+          } : {}),
+        });
 
-        if (
-            Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
-            Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
-            Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password
-        ) {
-          contextOptions.httpCredentials = {
-            username: jobItem.basicAuth.user,
-            password: jobItem.basicAuth.password,
-          };
-        }
-
-        page = await browser.newPage(contextOptions);
-        pageContext = page.context();
-        await func.setHeaders(pageContext, jobItem, headerState);
+        const browserContext = page.context();
+        await func.setHeaders(browserContext, jobItem, headerState);
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
           await page.emulateMedia({colorScheme: 'dark'});
@@ -278,9 +277,7 @@ module.exports = {
           jsConsole.push(consoleMes)
         })
 
-        if (pageContext) {
-          await pageContext.clearCookies();
-        }
+        await browserContext.clearCookies();
         logger.debug('setHeaders prepared', {
           userAgent: userAgentString,
           extraHeaders: headerState?.headers || {}
@@ -319,13 +316,9 @@ module.exports = {
         }
 
         const callRailBlockEnabled = Object.hasOwn(jobItem, 'project_id') && jobItem.project_id === 21791;
+
         let basicAuthRouteConfig = null;
-        if (
-            Object.hasOwn(jobItem, 'basicAuth') && jobItem.basicAuth &&
-            Object.hasOwn(jobItem.basicAuth, 'user') && jobItem.basicAuth.user &&
-            Object.hasOwn(jobItem.basicAuth, 'password') && jobItem.basicAuth.password &&
-            url.startsWith('http://')
-        ) {
+        if (hasBasicAuth && url.startsWith('http://')) {
           basicAuthRouteConfig = {
             header: `Basic ${Buffer.from(`${jobItem.basicAuth.user}:${jobItem.basicAuth.password}`).toString('base64')}`,
             targetHost: (() => {
@@ -352,55 +345,46 @@ module.exports = {
           });
         }
 
-        const shouldBlockRequest = (urlString) => {
-          if (!callRailBlockEnabled) {
-            return false;
-          }
-          try {
-            const parsed = new URL(urlString);
-            if (callRailBlockEnabled && /swap_session\.json/i.test(parsed.pathname)) {
-              return true;
+        if (callRailBlockEnabled || basicAuthRouteConfig) {
+          await page.route('**/*', (route) => {
+            const request = route.request();
+            const requestUrl = request.url();
+
+            if (callRailBlockEnabled) {
+              try {
+                if (/swap_session\.json/i.test(new URL(requestUrl).pathname)) {
+                  route.abort().catch((error) => {
+                    logger.warn('Failed to abort blocked request', { error, requestUrl });
+                  });
+                  return;
+                }
+              } catch (_) {}
             }
-          } catch (_) {
-            return false;
-          }
-          return false;
-        };
 
-        await page.route('**/*', (route) => {
-          const request = route.request();
-          const requestUrl = request.url();
+            let continueOptions = null;
 
-          if (shouldBlockRequest(requestUrl)) {
-            route.abort().catch((error) => {
-              logger.warn('Failed to abort blocked request', { error, requestUrl });
+            if (basicAuthRouteConfig) {
+              const headers = {
+                ...request.headers(),
+                Authorization: basicAuthRouteConfig.header,
+              };
+
+              let overriddenUrl = requestUrl;
+              try {
+                const host = new URL(requestUrl).host;
+                if (host && basicAuthRouteConfig.targetHost && host === basicAuthRouteConfig.targetHost) {
+                  overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
+                }
+              } catch (_) {}
+
+              continueOptions = { headers, url: overriddenUrl };
+            }
+
+            route.continue(continueOptions || undefined).catch((error) => {
+              logger.warn('Failed to continue request', { error, requestUrl });
             });
-            return;
-          }
-
-          let continueOptions = null;
-
-          if (basicAuthRouteConfig) {
-            const headers = {
-              ...request.headers(),
-              Authorization: basicAuthRouteConfig.header,
-            };
-
-            let overriddenUrl = requestUrl;
-            try {
-              const host = new URL(requestUrl).host;
-              if (host && basicAuthRouteConfig.targetHost && host === basicAuthRouteConfig.targetHost) {
-                overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
-              }
-            } catch (_) {}
-
-            continueOptions = { headers, url: overriddenUrl };
-          }
-
-          route.continue(continueOptions || undefined).catch((error) => {
-            logger.warn('Failed to continue request', { error, requestUrl });
           });
-        });
+        }
 
         // Add new cookies.
         let cookies = await func.addCookies(jobItem)
@@ -419,8 +403,8 @@ module.exports = {
           cookies = cookies.concat(authCookies)
         }
 
-        if (cookies?.length && pageContext) {
-          await pageContext.addCookies(cookies)
+        if (cookies?.length) {
+          await browserContext.addCookies(cookies)
         }
 
         let response;
@@ -441,7 +425,7 @@ module.exports = {
             throw new Error('Cloudflare challenge unresolved: Please unblock challenges.cloudflare.com')
           }
         } catch (err) {
-          logger.warn('page was not loaded by networkidle', {url})
+          logger.debug('page was not loaded by networkidle')
 
           try {
             response = await page.goto(url, {waitUntil: 'load'})
@@ -458,7 +442,7 @@ module.exports = {
               throw new Error('Cloudflare challenge unresolved after reload')
             }
           } catch (err) {
-            logger.error('page was not loaded by load or domcontentloaded', {error: err, url})
+            logger.warn('page was not loaded by load or domcontentloaded', {error: err, url})
           }
         }
 
@@ -663,7 +647,6 @@ module.exports = {
         logger.debug('page close done')
         page = null
 
-
         // check webp format
         const screenshotSize = await func.getImageSize(filename)
         let webpWasUsed = false
@@ -782,7 +765,6 @@ module.exports = {
           }
           page = null
         }
-
 
         // Retry once for transient target/session closed errors
         const msg = (err && Object.hasOwn(err, 'message')) ? err.message : err.toString()
