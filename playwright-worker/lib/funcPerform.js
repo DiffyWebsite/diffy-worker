@@ -203,10 +203,36 @@ const installSelectorEngineGuards = async (page) => {
         }
       };
 
+      const protectGlobalConstructor = (key, value) => {
+        if (!key || typeof value !== 'function') {
+          return;
+        }
+
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+          if (!descriptor || descriptor.configurable || descriptor.writable || descriptor.value !== value) {
+            Object.defineProperty(globalThis, key, {
+              configurable: false,
+              enumerable: false,
+              writable: false,
+              value,
+            });
+          }
+        } catch (_) {
+          try {
+            globalThis[key] = value;
+          } catch (_) {}
+        }
+      };
+
       try {
         if (typeof globalThis === 'object' && globalThis) {
-          protectIterableProto(globalThis.Map && globalThis.Map.prototype);
-          protectIterableProto(globalThis.Set && globalThis.Set.prototype);
+          const nativeMap = globalThis.Map;
+          const nativeSet = globalThis.Set;
+          protectIterableProto(nativeMap && nativeMap.prototype);
+          protectIterableProto(nativeSet && nativeSet.prototype);
+          protectGlobalConstructor('Map', nativeMap);
+          protectGlobalConstructor('Set', nativeSet);
         }
       } catch (_) {}
     });
