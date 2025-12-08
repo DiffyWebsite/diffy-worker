@@ -345,7 +345,10 @@ module.exports = {
           });
         }
 
-        if (callRailBlockEnabled || basicAuthRouteConfig) {
+        const deterrenceState = headerState?.deterrenceBypass
+        const selectiveHeaderRoutingEnabled = callRailBlockEnabled || basicAuthRouteConfig || deterrenceState?.enabled
+
+        if (selectiveHeaderRoutingEnabled) {
           await page.route('**/*', (route) => {
             const request = route.request();
             const requestUrl = request.url();
@@ -361,26 +364,43 @@ module.exports = {
               } catch (_) {}
             }
 
-            let continueOptions = null;
+            let headersOverride = null;
+            let overriddenUrl = requestUrl;
+
+            const ensureHeadersCopy = () => {
+              if (!headersOverride) {
+                headersOverride = { ...request.headers() };
+              }
+              return headersOverride;
+            };
 
             if (basicAuthRouteConfig) {
-              const headers = {
-                ...request.headers(),
-                Authorization: basicAuthRouteConfig.header,
-              };
+              const headers = ensureHeadersCopy();
+              headers.Authorization = basicAuthRouteConfig.header;
 
-              let overriddenUrl = requestUrl;
               try {
                 const host = new URL(requestUrl).host;
                 if (host && basicAuthRouteConfig.targetHost && host === basicAuthRouteConfig.targetHost) {
                   overriddenUrl = overriddenUrl.replace(/^https:/, 'http:');
                 }
               } catch (_) {}
-
-              continueOptions = { headers, url: overriddenUrl };
             }
 
-            route.continue(continueOptions || undefined).catch((error) => {
+            if (deterrenceState && func.shouldApplyDeterrenceHeader(deterrenceState, requestUrl, request.resourceType())) {
+              const headers = ensureHeadersCopy();
+              headers[deterrenceState.headerName] = deterrenceState.headerValue;
+            }
+
+            const hasHeaderOverrides = headersOverride && Object.keys(headersOverride).length > 0;
+            const needsUrlOverride = overriddenUrl !== requestUrl;
+            const continueOptions = (hasHeaderOverrides || needsUrlOverride)
+              ? {
+                  ...(hasHeaderOverrides ? { headers: headersOverride } : {}),
+                  ...(needsUrlOverride ? { url: overriddenUrl } : {})
+                }
+              : undefined;
+
+            route.continue(continueOptions).catch((error) => {
               logger.warn('Failed to continue request', { error, requestUrl });
             });
           });

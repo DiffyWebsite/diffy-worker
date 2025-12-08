@@ -7,6 +7,67 @@ const crypto = require('crypto')
 const sharp = require('sharp')
 const logger = require('./logger')
 
+const FONT_HOST_DENYLIST = new Set(['fonts.gstatic.com'])
+const FONT_FILE_PATTERN = /\.(woff2?|ttf|otf)(?:[?#].*)?$/i
+const PANTHEON_HOST_PATTERN = /(^|\.)pantheonsite\.io$/i
+
+const parseHostname = (input) => {
+  if (!input || typeof input !== 'string') {
+    return ''
+  }
+  try {
+    return new URL(input).hostname.toLowerCase()
+  } catch (_) {
+    return ''
+  }
+}
+
+const isFontLikeRequest = (requestUrl, resourceType = '') => {
+  if (!requestUrl) {
+    return resourceType === 'font'
+  }
+  const hostname = parseHostname(requestUrl)
+  if (hostname && FONT_HOST_DENYLIST.has(hostname)) {
+    return true
+  }
+
+  if (resourceType === 'font') {
+    return true
+  }
+
+  try {
+    const pathname = new URL(requestUrl).pathname || ''
+    return FONT_FILE_PATTERN.test(pathname)
+  } catch (_) {
+    return FONT_FILE_PATTERN.test(requestUrl)
+  }
+}
+
+const shouldEnableDeterrenceBypass = (jobUrl) => {
+  if (!jobUrl) {
+    return false
+  }
+  const hostname = parseHostname(jobUrl)
+  return Boolean(hostname && PANTHEON_HOST_PATTERN.test(hostname))
+}
+
+const shouldApplyDeterrenceHeader = (deterrenceState, requestUrl, resourceType = '') => {
+  if (!deterrenceState?.enabled || !requestUrl) {
+    return false
+  }
+
+  if (isFontLikeRequest(requestUrl, resourceType)) {
+    return false
+  }
+
+  const hostname = parseHostname(requestUrl)
+  if (!hostname) {
+    return false
+  }
+
+  return PANTHEON_HOST_PATTERN.test(hostname)
+}
+
 const describeError = (err) => {
   if (!err) {
     return 'unknown error'
@@ -189,12 +250,20 @@ const buildHeaderState = (job) => {
     })
   }
 
-  if (job.url && job.url.includes('pantheonsite.io')) {
-    headers['Deterrence-Bypass'] = '1'
-    logger.debug('Deterrence-Bypass set')
+  const deterrenceEnabled = shouldEnableDeterrenceBypass(job?.url)
+  if (deterrenceEnabled) {
+    logger.debug('Deterrence-Bypass enabled for pantheonsite.io requests')
   }
 
-  return { userAgentString, headers }
+  return {
+    userAgentString,
+    headers,
+    deterrenceBypass: {
+      enabled: deterrenceEnabled,
+      headerName: 'Deterrence-Bypass',
+      headerValue: '1'
+    }
+  }
 }
 
 module.exports = {
@@ -903,6 +972,10 @@ module.exports = {
 
   buildHeaderState: (job) => {
     return buildHeaderState(job)
+  },
+
+  shouldApplyDeterrenceHeader: (state, requestUrl, resourceType = '') => {
+    return shouldApplyDeterrenceHeader(state, requestUrl, resourceType)
   },
 
   cropElement: async (page, job) => {
