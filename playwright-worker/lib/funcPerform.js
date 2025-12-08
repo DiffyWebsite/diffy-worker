@@ -587,7 +587,13 @@ module.exports = {
           }
           return document.fonts.ready
         }, undefined, 'fonts.ready wait')
-        await page.waitForFunction(() => document.readyState === 'complete', undefined, {timeout: 30000})
+        await pollUntil(page, () => document.readyState === 'complete', {
+          timeoutMs: 30000,
+          intervalMs: 250,
+          label: 'document.readyState === complete',
+        }).catch((error) => {
+          logger.warn('document.readyState wait failed', {error});
+        })
         await page.waitForTimeout(1000)
 
         // @see https://github.com/ygerasimov/diffy-pm/issues/250 (wp-rocket fix)
