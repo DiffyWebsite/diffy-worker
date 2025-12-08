@@ -155,92 +155,6 @@ async function disableGifAnimation(page) {
   });
 }
 
-const installSelectorEngineGuards = async (page) => {
-  if (!page || typeof page.addInitScript !== 'function') {
-    return;
-  }
-
-  try {
-    await page.addInitScript(() => {
-      const protectMethod = (proto, key) => {
-        if (!proto || !key) {
-          return;
-        }
-
-        const descriptor = Object.getOwnPropertyDescriptor(proto, key);
-        const value = descriptor && typeof descriptor.value === 'function'
-          ? descriptor.value
-          : proto[key];
-
-        if (typeof value !== 'function') {
-          return;
-        }
-
-        try {
-          Object.defineProperty(proto, key, {
-            configurable: false,
-            enumerable: false,
-            writable: false,
-            value,
-          });
-        } catch (_) {
-          try {
-            proto[key] = value;
-          } catch (_) {}
-        }
-      };
-
-      const protectIterableProto = (proto) => {
-        if (!proto || typeof proto !== 'object') {
-          return;
-        }
-
-        protectMethod(proto, 'keys');
-        protectMethod(proto, 'values');
-        protectMethod(proto, 'entries');
-        if (typeof Symbol === 'function' && Symbol.iterator) {
-          protectMethod(proto, Symbol.iterator);
-        }
-      };
-
-      const protectGlobalConstructor = (key, value) => {
-        if (!key || typeof value !== 'function') {
-          return;
-        }
-
-        try {
-          const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
-          if (!descriptor || descriptor.configurable || descriptor.writable || descriptor.value !== value) {
-            Object.defineProperty(globalThis, key, {
-              configurable: false,
-              enumerable: false,
-              writable: false,
-              value,
-            });
-          }
-        } catch (_) {
-          try {
-            globalThis[key] = value;
-          } catch (_) {}
-        }
-      };
-
-      try {
-        if (typeof globalThis === 'object' && globalThis) {
-          const nativeMap = globalThis.Map;
-          const nativeSet = globalThis.Set;
-          protectIterableProto(nativeMap && nativeMap.prototype);
-          protectIterableProto(nativeSet && nativeSet.prototype);
-          protectGlobalConstructor('Map', nativeMap);
-          protectGlobalConstructor('Set', nativeSet);
-        }
-      } catch (_) {}
-    });
-  } catch (error) {
-    logger.warn('Failed to add selector engine guards', { error });
-  }
-}
-
 // Safe helpers to avoid calling into a closed target.
 const ensureOpen = (page, label = 'operation') => {
   if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
@@ -332,7 +246,6 @@ module.exports = {
 
         page = await browser.newPage(contextOptions);
         pageContext = page.context();
-        await installSelectorEngineGuards(page);
         await func.setHeaders(pageContext, jobItem, headerState);
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
