@@ -546,254 +546,50 @@ module.exports = {
     }
 
     return page.evaluate((_elements) => {
-
-      const ensureMaskManager = () => {
-        if (window.__diffyMaskManager) {
-          return window.__diffyMaskManager
+      const isVisible = (element) => {
+        if (!element) {
+          return false
         }
-
-        const overlays = new Map()
-        let scheduled = false
-
-        const clampPositive = (value, fallback) => {
-          const number = Number.parseFloat(value)
-          if (Number.isFinite(number) && number > 0) {
-            return number
-          }
-          return fallback
-        }
-
-        const clamp = (value, min, max) => {
-          if (!Number.isFinite(value)) {
-            return value
-          }
-
-          if (Number.isFinite(min) && value < min) {
-            return min
-          }
-
-          if (Number.isFinite(max) && value > max) {
-            return max
-          }
-
-          return value
-        }
-
-        const syncOverlay = (entry) => {
-          if (!entry?.element || !entry.overlay || !entry.element.isConnected) {
-            if (entry?.resizeObserver) {
-              try {
-                entry.resizeObserver.disconnect()
-              } catch (_) {}
-            }
-            if (entry?.overlay?.isConnected) {
-              entry.overlay.remove()
-            }
-            overlays.delete(entry?.element)
-            return
-          }
-
-          const element = entry.element
-          const overlay = entry.overlay
-          const rect = element.getBoundingClientRect()
-          const computed = window.getComputedStyle(element)
-
-          const widthCandidates = [
-            rect.width,
-            element.offsetWidth,
-            element.scrollWidth,
-            clampPositive(computed?.width, 0),
-          ].filter((candidate) => Number.isFinite(candidate) && candidate > 0)
-
-          const heightCandidates = [
-            rect.height,
-            element.offsetHeight,
-            element.scrollHeight,
-            clampPositive(computed?.height, 0),
-          ].filter((candidate) => Number.isFinite(candidate) && candidate > 0)
-
-          const width = widthCandidates.length ? Math.max(...widthCandidates) : 0
-          const height = heightCandidates.length ? Math.max(...heightCandidates) : 0
-
-          if (!width || !height) {
-            overlay.style.display = 'none'
-            return
-          }
-
-          const extra = 2
-          const position = computed?.position || 'static'
-          const isFixed = position === 'fixed'
-          const scrollX = window.scrollX || window.pageXOffset || document.documentElement?.scrollLeft || 0
-          const scrollY = window.scrollY || window.pageYOffset || document.documentElement?.scrollTop || 0
-          const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0
-          const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0
-          const hasViewportBounds = Number.isFinite(viewportWidth) && viewportWidth > 0 && Number.isFinite(viewportHeight) && viewportHeight > 0
-
-          const baseTop = isFixed ? rect.top : rect.top + scrollY
-          const baseLeft = isFixed ? rect.left : rect.left + scrollX
-          const baseBottom = baseTop + height
-          const baseRight = baseLeft + width
-
-          let targetTop = baseTop - extra
-          let targetLeft = baseLeft - extra
-          let targetBottom = baseBottom + extra
-          let targetRight = baseRight + extra
-
-          if (hasViewportBounds) {
-            const minLeft = isFixed ? 0 : scrollX
-            const maxRight = (isFixed ? 0 : scrollX) + viewportWidth
-            const minTop = isFixed ? 0 : scrollY
-            const maxBottom = (isFixed ? 0 : scrollY) + viewportHeight
-
-            targetLeft = clamp(targetLeft, minLeft, maxRight)
-            targetRight = clamp(targetRight, minLeft, maxRight)
-            targetTop = clamp(targetTop, minTop, maxBottom)
-            targetBottom = clamp(targetBottom, minTop, maxBottom)
-          }
-
-          const finalWidth = Math.max(0, targetRight - targetLeft)
-          const finalHeight = Math.max(0, targetBottom - targetTop)
-
-          if (!finalWidth || !finalHeight) {
-            overlay.style.display = 'none'
-            return
-          }
-
-          overlay.style.display = 'block'
-          overlay.style.position = isFixed ? 'fixed' : 'absolute'
-          overlay.style.top = `${targetTop}px`
-          overlay.style.left = `${targetLeft}px`
-          overlay.style.width = `${finalWidth}px`
-          overlay.style.height = `${finalHeight}px`
-          overlay.style.borderRadius = computed?.borderRadius || '0'
-        }
-
-        const scheduleSyncAll = () => {
-          if (scheduled) {
-            return
-          }
-          scheduled = true
-          requestAnimationFrame(() => {
-            scheduled = false
-            overlays.forEach((entry) => syncOverlay(entry))
-          })
-        }
-
-        window.addEventListener('scroll', scheduleSyncAll, { passive: true })
-        window.addEventListener('resize', scheduleSyncAll)
-
-        const manager = {
-          overlays,
-          scheduleSyncAll,
-          syncOverlay,
-          attach (element) {
-            if (!element || overlays.has(element)) {
-              scheduleSyncAll()
-              return
-            }
-
-            const overlay = document.createElement('div')
-            overlay.dataset.diffyMaskOverlay = 'true'
-            Object.assign(overlay.style, {
-              display: 'none',
-              position: 'absolute',
-              top: '0',
-              left: '0',
-              width: '0',
-              height: '0',
-              backgroundColor: '#00aa00',
-              opacity: '1',
-              mixBlendMode: 'normal',
-              pointerEvents: 'none',
-              margin: '0',
-              padding: '0',
-              border: '0',
-              zIndex: '2147483647',
-              boxSizing: 'border-box',
-              transform: 'translate3d(0,0,0)',
-            })
-
-            document.body.appendChild(overlay)
-
-            const entry = { element, overlay }
-
-            if (typeof ResizeObserver === 'function') {
-              entry.resizeObserver = new ResizeObserver(() => scheduleSyncAll())
-              try {
-                entry.resizeObserver.observe(element)
-              } catch (_) {}
-            }
-
-            overlays.set(element, entry)
-            syncOverlay(entry)
-          },
-        }
-
-        window.__diffyMaskManager = manager
-        return manager
-      }
-
-      const isHiddenByAttrs = (element) => {
-        let current = element
-        while (current && current.nodeType === Node.ELEMENT_NODE) {
-          if (current.hasAttribute?.('hidden') || current.hasAttribute?.('inert')) {
-            return true
-          }
-          const ariaHidden = current.getAttribute?.('aria-hidden')
-          if (ariaHidden && ariaHidden !== 'false') {
-            return true
-          }
-          current = current.parentElement
-        }
-        return false
-      }
-
-      const intersectsViewport = (rect) => {
-        const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0
-        const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0
-        if (!viewportWidth || !viewportHeight) {
-          return true
-        }
-        return !(
-          rect.bottom <= 0 ||
-          rect.right <= 0 ||
-          rect.top >= viewportHeight ||
-          rect.left >= viewportWidth
+        const style = window.getComputedStyle(element)
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          style.opacity !== '0' &&
+          element.offsetWidth > 0 &&
+          element.offsetHeight > 0
         )
       }
 
-      const isVisible = (element) => {
-        if (!element || isHiddenByAttrs(element)) {
-          return false
-        }
-
-        const style = window.getComputedStyle(element)
-        if (
-          style.display === 'none' ||
-          style.visibility === 'hidden' ||
-          parseFloat(style.opacity || '1') <= 0
-        ) {
-          return false
-        }
-
-        if (element.offsetParent === null && style.position !== 'fixed') {
-          return false
+      const maskElement = (element) => {
+        if (!isVisible(element)) {
+          return
         }
 
         const rect = element.getBoundingClientRect()
-        if (!rect || rect.width <= 0 || rect.height <= 0 || !intersectsViewport(rect)) {
-          return false
+        if (!rect || rect.width <= 0 || rect.height <= 0) {
+          return
         }
 
-        return (element.offsetWidth > 0 || element.offsetHeight > 0 || element.getClientRects().length > 0)
+        const overlay = document.createElement('div')
+        overlay.dataset.diffyMaskOverlay = 'true'
+        Object.assign(overlay.style, {
+          display: 'block',
+          position: 'absolute',
+          top: `${rect.top + window.scrollY}px`,
+          left: `${rect.left + window.scrollX}px`,
+          width: `${rect.width}px`,
+          height: `${rect.height}px`,
+          backgroundColor: '#00aa00',
+          zIndex: '9999',
+          pointerEvents: 'none'
+        })
+
+        document.body.appendChild(overlay)
       }
 
-      const manager = ensureMaskManager()
+      window.scrollTo(0, 0)
 
-      const selectors = Array.isArray(_elements)
-        ? _elements
-        : []
-
+      const selectors = Array.isArray(_elements) ? _elements : []
       selectors.forEach((selector) => {
         if (typeof selector !== 'string') {
           return
@@ -803,21 +599,10 @@ module.exports = {
           return
         }
 
-        const nodes = Array.from(document.querySelectorAll(trimmed))
-        nodes.forEach((node) => {
-          if (!isVisible(node)) {
-            return
-          }
-          manager.attach(node)
+        document.querySelectorAll(trimmed).forEach((element) => {
+          maskElement(element)
         })
       })
-
-      manager.scheduleSyncAll()
-
-      return {
-        maskedSelectors: selectors.length,
-        maskedElements: manager.overlays.size,
-      }
     }, job.args.elements)
   },
 
