@@ -119,7 +119,9 @@ class Jobs {
         break
 
       case 'drupal':
-        authArgs.url = screenshotBaseUrl + '/user'
+        // Hitting /user on locked down Drupal installs may return 403 without redirect.
+        // Jump directly to the login endpoint to avoid the forbidden response.
+        authArgs.url = screenshotBaseUrl + '/user/login'
         authArgs.usernameSelector = '#edit-name'
         authArgs.passwordSelector = '#edit-pass'
         authArgs.submitSelector = '#edit-submit'
