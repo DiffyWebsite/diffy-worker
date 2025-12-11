@@ -1,4 +1,4 @@
-const { anonymizeProxy, closeAnonymizedProxy } = require('proxy-chain');
+const proxyChain = require('proxy-chain');
 const { chromium } = require('playwright');
 const logger = require('./logger');
 
@@ -32,7 +32,7 @@ class ChromiumBrowser {
     };
 
     if (proxy) {
-      this.anonymizedProxy = await anonymizeProxy(proxy);
+      this.anonymizedProxy = await proxyChain.anonymizeProxy(proxy);
       launchArgs.push(`--proxy-server=${this.anonymizedProxy}`);
     }
 
@@ -50,13 +50,8 @@ class ChromiumBrowser {
 
   async closeProxy() {
     if (this.anonymizedProxy) {
-      try {
-        await closeAnonymizedProxy(this.anonymizedProxy, true);
-      } catch (e) {
-        logger.warn('Failed to close anonymized proxy', { error: e });
-      } finally {
-        this.anonymizedProxy = null;
-      }
+      await proxyChain.closeAnonymizedProxy(this.anonymizedProxy, true);
+      this.anonymizedProxy = null;
     }
   }
 }
