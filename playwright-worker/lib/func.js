@@ -242,6 +242,7 @@ const buildHeaderState = (job) => {
   }
 
   const headers = {}
+
   if (job?.args?.headers) {
     job.args.headers.forEach(element => {
       if (element.header && element.header.trim().length) {
@@ -737,7 +738,7 @@ module.exports = {
   //   fs.emptyDirSync(tmp)
   // },
 
-  setHeaders: async (context, job, preparedState = null) => {
+  setHeaders: async (page, job, preparedState = null) => {
     let state = preparedState
 
     if (!state) {
@@ -748,8 +749,8 @@ module.exports = {
       }
     }
 
-    if (context && state.headers && Object.keys(state.headers).length) {
-      await context.setExtraHTTPHeaders(state.headers)
+    if (page && state.headers && Object.keys(state.headers).length) {
+      await page.setExtraHTTPHeaders(state.headers)
     }
 
     return state

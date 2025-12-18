@@ -245,7 +245,7 @@ module.exports = {
         });
 
         const browserContext = page.context();
-        await func.setHeaders(browserContext, jobItem, headerState);
+        await func.setHeaders(page, jobItem, headerState);
 
         if (Object.hasOwn(jobItem.args, 'night_mode') && jobItem.args.night_mode) {
           await page.emulateMedia({colorScheme: 'dark'});
