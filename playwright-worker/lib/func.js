@@ -336,7 +336,7 @@ module.exports = {
     try {
       await page.evaluate(job.args.js_code)
     } catch (e) {
-      logger.warn('Failed to evaluate page', { error: e, js_code: job.args.js_code })
+      logger.debug('Failed to evaluate page', { error: e, js_code: job.args.js_code })
     }
 
     await page.waitForTimeout(2000)
