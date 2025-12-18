@@ -281,10 +281,10 @@ module.exports = {
     let totalHeight = 0;
 
     do {
-      await page.waitForSelector('body');
+      await page.waitForSelector('body', { state: 'attached' });
       scrollHeight = await page.evaluate('document.body.scrollHeight');
 
-      await page.waitForSelector('body');
+      await page.waitForSelector('body', { state: 'attached' });
       await page.evaluate('window.scrollBy(0, 100)');
       totalHeight += 100;
 
