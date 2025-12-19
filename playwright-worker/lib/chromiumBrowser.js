@@ -4,7 +4,6 @@ const logger = require('./logger');
 
 const BASE_ARGS = [
   '--no-sandbox',
-  '--disable-gpu',
   '--disable-dev-shm-usage',
   '--disable-blink-features=AutomationControlled',
   '--disable-features=IsolateOrigins,site-per-process',
