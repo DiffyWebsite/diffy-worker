@@ -3,6 +3,31 @@ const thumbnail = require('./thumbnail.js')
 const func = require('./func.js')
 const logger = require('./logger')
 
+const formatLoggedError = (error) => {
+  if (!error) {
+    return { message: 'Unknown error' }
+  }
+
+  if (typeof error === 'string') {
+    return { message: error }
+  }
+
+  const details = {
+    name: error.name || 'Error',
+    message: error.message || String(error)
+  }
+
+  if (error.stack) {
+    details.stack = error.stack
+  }
+
+  if (Object.hasOwn(error, 'code')) {
+    details.code = error.code
+  }
+
+  return details
+}
+
 const sendResult = (job, jobItem, data) => {
   job.status = true
   job.item_result = data
@@ -401,7 +426,19 @@ module.exports = {
               : undefined;
 
             route.continue(continueOptions).catch((error) => {
-              logger.warn('Failed to continue request', { error, requestUrl });
+              logger.warn('Failed to continue request', {
+                requestUrl,
+                requestMethod: request.method(),
+                resourceType: request.resourceType(),
+                isNavigationRequest: typeof request.isNavigationRequest === 'function'
+                  ? request.isNavigationRequest()
+                  : undefined,
+                overrides: {
+                  headerKeys: headersOverride ? Object.keys(headersOverride) : [],
+                  urlChanged: needsUrlOverride,
+                },
+                error: formatLoggedError(error)
+              })
             });
           });
         }
