@@ -374,7 +374,7 @@ module.exports = {
         const selectiveHeaderRoutingEnabled = callRailBlockEnabled || basicAuthRouteConfig || deterrenceState?.enabled
 
         if (selectiveHeaderRoutingEnabled) {
-          await page.route('**/*', (route) => {
+          await page.route('**/*', async (route) => {
             const request = route.request();
             const requestUrl = request.url();
 
@@ -418,28 +418,95 @@ module.exports = {
 
             const hasHeaderOverrides = headersOverride && Object.keys(headersOverride).length > 0;
             const needsUrlOverride = overriddenUrl !== requestUrl;
-            const continueOptions = (hasHeaderOverrides || needsUrlOverride)
-              ? {
-                  ...(hasHeaderOverrides ? { headers: headersOverride } : {}),
-                  ...(needsUrlOverride ? { url: overriddenUrl } : {})
-                }
-              : undefined;
 
-            route.continue(continueOptions).catch((error) => {
-              logger.warn('Failed to continue request', {
+            const continueWithLogging = async (options) => {
+              try {
+                await route.continue(options);
+              } catch (error) {
+                logger.warn('Failed to continue request', {
+                  requestUrl,
+                  requestMethod: request.method(),
+                  resourceType: request.resourceType(),
+                  isNavigationRequest: typeof request.isNavigationRequest === 'function'
+                    ? request.isNavigationRequest()
+                    : undefined,
+                  overrides: {
+                    headerKeys: headersOverride ? Object.keys(headersOverride) : [],
+                    urlChanged: Boolean(options && options.url && options.url !== requestUrl),
+                  },
+                  error: formatLoggedError(error)
+                });
+              }
+            };
+
+            const headerOverrideOptions = hasHeaderOverrides ? { headers: headersOverride } : undefined;
+
+            if (!needsUrlOverride) {
+              await continueWithLogging(headerOverrideOptions);
+              return;
+            }
+
+            let originalProtocol;
+            let overrideProtocol;
+            try {
+              originalProtocol = new URL(requestUrl).protocol;
+              overrideProtocol = new URL(overriddenUrl).protocol;
+            } catch (error) {
+              logger.warn('Failed to parse URLs for override; continuing without URL change', {
                 requestUrl,
-                requestMethod: request.method(),
-                resourceType: request.resourceType(),
-                isNavigationRequest: typeof request.isNavigationRequest === 'function'
-                  ? request.isNavigationRequest()
-                  : undefined,
-                overrides: {
-                  headerKeys: headersOverride ? Object.keys(headersOverride) : [],
-                  urlChanged: needsUrlOverride,
-                },
+                attemptedUrl: overriddenUrl,
                 error: formatLoggedError(error)
-              })
-            });
+              });
+              await continueWithLogging(headerOverrideOptions);
+              return;
+            }
+
+            if (originalProtocol === overrideProtocol) {
+              await continueWithLogging({
+                ...headerOverrideOptions,
+                url: overriddenUrl
+              });
+              return;
+            }
+
+            const fetchHeaders = hasHeaderOverrides ? headersOverride : request.headers();
+            const requestMethod = request.method();
+            const postData = request.postData();
+
+            const fetchOptions = {
+              url: overriddenUrl,
+              headers: fetchHeaders,
+              ...(requestMethod && requestMethod !== 'GET' ? { method: requestMethod } : {}),
+              ...(postData ? { postData } : {})
+            };
+
+            let fetchResponse;
+            try {
+              fetchResponse = await route.fetch(fetchOptions);
+            } catch (error) {
+              logger.warn('Failed to fetch overridden protocol request; falling back to original URL', {
+                requestUrl,
+                attemptedUrl: overriddenUrl,
+                requestMethod,
+                resourceType: request.resourceType(),
+                error: formatLoggedError(error)
+              });
+              await continueWithLogging(headerOverrideOptions);
+              return;
+            }
+
+            try {
+              await route.fulfill({ response: fetchResponse });
+            } catch (error) {
+              logger.warn('Failed to fulfill fetched response; continuing without URL override', {
+                requestUrl,
+                attemptedUrl: overriddenUrl,
+                requestMethod,
+                resourceType: request.resourceType(),
+                error: formatLoggedError(error)
+              });
+              await continueWithLogging(headerOverrideOptions);
+            }
           });
         }
 
