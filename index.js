@@ -16,7 +16,7 @@ const { ChromiumBrowser } = require('./lib/chromiumBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
 
 const argv = require('minimist')(process.argv.slice(2));
-const local = argv.local ? argv.local : false;
+const local = argv.local.toLowerCase() === 'true';
 const jobFile = argv.file !== undefined;
 const jobFileContent = argv['file-content'] !== undefined ? argv['file-content'] : false;
 const outputFilepath = argv['output-filepath'] !== undefined ? argv['output-filepath'] : false;
