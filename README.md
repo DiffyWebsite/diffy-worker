@@ -57,23 +57,12 @@ docker buildx ls
 docker buildx rm multi-platform-builder
 ```
 
-### Puppeteer & Chrome
-
-List of compatible versions of puppeteer and Chrome
-https://pptr.dev/supported-browsers
+### Chrome
 
 To install specific version of Chromium
 https://www.chromium.org/getting-involved/download-chromium/
 
-Chromium 131 was installed from specific source
-```shell
-# Install Chrome for Puppeteer
-RUN npx @puppeteer/browsers install chrome@131.0.6778.85 --base-url=https://storage.googleapis.com/chrome-for-testing-public
-# Dependencies for Chrome
-RUN apt-get install -y libgbm-dev
-# Link Chrome
-RUN ln -s /diffy-worker/chrome/linux-131.0.6778.85/chrome-linux64/chrome /usr/bin/chromium-browser
-```
+Chromium 136 installed as part of Ubuntu 24.04.
 
 Create a job in SQS. Once created edit it and clear "Access policy" section. 
 
