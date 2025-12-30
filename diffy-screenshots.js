@@ -81,8 +81,10 @@ process.on('unhandledRejection', async (reason, p) => {
         console.log('Failed to write file', err);
       }
       console.log(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
+      const startTime = performance.now();
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
-      console.log(`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
+      const duration = ((performance.now() - startTime) / 1000).toFixed(2);
+      console.log(`Completed screenshot ${(index + 1)} of ${jobsList.length} in ${duration}s`);
       const resultsContent = await fs.readFile(outputFilepath, 'utf8');
       console.log('Output file content', resultsContent);
       let result = JSON.parse(resultsContent);
