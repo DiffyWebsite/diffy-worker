@@ -1,5 +1,5 @@
 // Example to run
-// node diffy-screenshots.js --url=https://diffy.website
+// node --env-file=.env diffy-screenshots.js --url=https://diffy.website
 const process = require("process");
 
 const logger = require('./lib/logger')
@@ -9,6 +9,9 @@ const jobs = new Jobs(logger)
 
 const { Api } = require('./lib/api.js')
 const fs = require("fs/promises");
+const Promise = require("bluebird");
+const path = require("path");
+const os = require("os");
 
 const apiKey = process.env.DIFFY_API_KEY || ''
 if (apiKey == '') {
@@ -20,6 +23,8 @@ if (projectId == '') {
   console.log('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX')
   return;
 }
+const maxWorkers = parseInt(process.env.DIFFY_MAX_WORKERS || '5');
+console.log(`Running with ${maxWorkers} workers`);
 
 const diffyUrl = 'https://app.diffy.website/api'
 const diffyWebsiteUrl = 'https://app.diffy.website/#'
@@ -68,25 +73,32 @@ process.on('unhandledRejection', async (reason, p) => {
     const util = require('node:util');
     const exec = util.promisify(require('node:child_process').exec);
 
-    const outputFilepath = '/tmp/screenshot-results.json';
-    const inputFilepath = '/tmp/screenshot-input.json';
-    let uploadItems = [];
+    const uploadItems = await Promise.map(jobsList, async (job, index) => {
+      const outputFilepath = path.join(os.tmpdir(), `screenshot-results-${index}.json`);
+      const inputFilepath = path.join(os.tmpdir(), `screenshot-input-${index}.json`);
 
-    for (let index = 0; index < jobsList.length; index++) {
-      const job = jobsList[index];
       let jsonJob = JSON.stringify(job);
       try {
         await fs.writeFile(inputFilepath, jsonJob);
       } catch (err) {
         console.log('Failed to write file', err);
       }
+
       console.log(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
+      const startTime = performance.now();
       await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
-      console.log(`Completed screenshot ${(index + 1)} of ${jobsList.length}`);
+      const duration = ((performance.now() - startTime) / 1000).toFixed(2);
+      console.log(`Completed screenshot ${(index + 1)} of ${jobsList.length} in ${duration}s`);
+
       const resultsContent = await fs.readFile(outputFilepath, 'utf8');
       console.log('Output file content', resultsContent);
       let result = JSON.parse(resultsContent);
-      let uploadItem = {
+
+      // Clean up temp files
+      await fs.unlink(inputFilepath).catch(() => {});
+      await fs.unlink(outputFilepath).catch(() => {});
+
+      return {
         status: true,
         breakpoint: job.params.breakpoint,
         uri: job.params.uri,
@@ -94,8 +106,7 @@ process.on('unhandledRejection', async (reason, p) => {
         htmlFilename: result.html,
         jsConsoleFilename: result.jsConsole
       };
-      uploadItems.push(uploadItem);
-    }
+    }, { concurrency: maxWorkers });
 
     // Send screenshots to Diffy.
     screenshotId = await api.uploadScreenshots(screenshotName, uploadItems)
