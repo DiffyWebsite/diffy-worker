@@ -1,5 +1,5 @@
 // Example to run
-// node diffy-screenshots.js --url=https://diffy.website
+// node --env-file=.env diffy-screenshots.js --url=https://diffy.website
 const process = require("process");
 
 const logger = require('./lib/logger')
@@ -23,6 +23,8 @@ if (projectId == '') {
   console.log('Add Diffy API project ID .env file. DIFFY_PROJECT_ID=XXX')
   return;
 }
+const maxWorkers = parseInt(process.env.DIFFY_MAX_WORKERS || '5');
+console.log(`Running with ${maxWorkers} workers`);
 
 const diffyUrl = 'https://app.diffy.website/api'
 const diffyWebsiteUrl = 'https://app.diffy.website/#'
@@ -70,7 +72,6 @@ process.on('unhandledRejection', async (reason, p) => {
 
     const util = require('node:util');
     const exec = util.promisify(require('node:child_process').exec);
-    const maxWorkers = parseInt(process.env.MAX_WORKERS || '2');
 
     const uploadItems = await Promise.map(jobsList, async (job, index) => {
       const outputFilepath = path.join(os.tmpdir(), `screenshot-results-${index}.json`);
