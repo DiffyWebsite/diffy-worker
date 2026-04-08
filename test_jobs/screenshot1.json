@@ -17,6 +17,7 @@
             "user": "",
             "password": ""
         },
-        "mhtml": 1
+        "mhtml": 1,
+        "engine": "chromium"
     }
 }
