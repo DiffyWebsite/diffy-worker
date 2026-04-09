@@ -15,7 +15,7 @@ const logger = require('./lib/logger')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
 
 
-const KNOWN_ENGINES = ['chromium', 'webkit']
+const KNOWN_ENGINES = ['playwrightChrome131', 'webkit']
 
 function getBrowserClass(engine) {
   const normalized = (engine || '').toLowerCase()
@@ -171,7 +171,7 @@ process.on('unhandledRejection', (reason, p) => {
     let proxy = null
     const data = JSON.parse(message.Body);
 
-    const engineParam = data?.params?.engine || process.env.BROWSER_ENGINE || 'chromium'
+    const engineParam = data?.params?.engine || process.env.BROWSER_ENGINE || 'playwrightChrome131'
     browserInstance = new (getBrowserClass(engineParam))(debug, local)
 
     logger.defaultMeta.project_id = data?.project_id
