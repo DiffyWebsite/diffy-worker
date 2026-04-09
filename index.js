@@ -19,7 +19,7 @@ const KNOWN_ENGINES = ['playwrightChrome131', 'webkit']
 
 function getBrowserClass(engine) {
   const normalized = (engine || '').toLowerCase()
-  if (!KNOWN_ENGINES.includes(normalized)) {
+  if (!KNOWN_ENGINES.map(e => e.toLowerCase()).includes(normalized)) {
     logger.warn(`Unknown engine "${engine}", defaulting to chromium`)
     return require('./lib/chromiumBrowser').ChromiumBrowser
   }
