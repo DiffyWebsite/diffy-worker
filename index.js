@@ -12,8 +12,19 @@ const debug = !!process.env.DEBUG;
 const { performance } = require('perf_hooks')
 const { Executor } = require('./lib/executor')
 const logger = require('./lib/logger')
-const { ChromiumBrowser } = require('./lib/chromiumBrowser')
 const { SqsSender, maxAttempts } = require('./lib/sqsSender')
+
+
+const KNOWN_ENGINES = ['playwrightChrome131', 'webkit']
+
+function getBrowserClass(engine) {
+  const normalized = (engine || '').toLowerCase()
+  if (!KNOWN_ENGINES.map(e => e.toLowerCase()).includes(normalized)) {
+    logger.warn(`Unknown engine "${engine}", defaulting to chromium`)
+    return require('./lib/chromiumBrowser').ChromiumBrowser
+  }
+  return normalized === 'webkit' ? require('./lib/webkitBrowser').WebkitBrowser : require('./lib/chromiumBrowser').ChromiumBrowser
+}
 
 const argv = require('minimist')(process.argv.slice(2));
 const local = argv.local !== undefined ? argv.local.toLowerCase() === 'true' : false;
@@ -63,7 +74,7 @@ function end () {
   } catch (e) {
     logger.error('Failed to clean tmp directory', e)
   }
-  process.exit(1)
+  process.exit(0)
 }
 
 process.once('SIGTERM', end)
@@ -97,10 +108,10 @@ process.on('unhandledRejection', (reason, p) => {
   }
 
   let browser = null
+  let browserInstance = null
   let results = []
   let handlerTimeExecuteStart = performance.now();
   const executor = new Executor(debug, local);
-  const chromiumBrowser = new ChromiumBrowser(debug, local)
 
   let shutdownTimeout = null;
   let shutdownDeadlineTs = handlerTimeExecuteStart + DEFAULT_TIMEOUT_MS;
@@ -160,6 +171,9 @@ process.on('unhandledRejection', (reason, p) => {
     let proxy = null
     const data = JSON.parse(message.Body);
 
+    const engineParam = data?.params?.engine || process.env.BROWSER_ENGINE || 'playwrightChrome131'
+    browserInstance = new (getBrowserClass(engineParam))(debug, local)
+
     logger.defaultMeta.project_id = data?.project_id
     logger.defaultMeta.snapshot_id = data?.job_id
     logger.defaultMeta.job_id = data?.id
@@ -177,25 +191,29 @@ process.on('unhandledRejection', (reason, p) => {
     const baseHandler = Math.max(DEFAULT_TIMEOUT_MS, 5 * 60 * 1000 + extraBufferMs);
 
     scheduleShutdown(baseHandler);
-    browser = await chromiumBrowser.getBrowser(proxy)
+    browser = await browserInstance.getBrowser(proxy)
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
       // logger.info('Executor result', results);
     }
     if (outputFilepath) {
-      fs.writeFile(outputFilepath, JSON.stringify(results[0]), err => {
-        if (err) {
-          logger.error('Failed to output file', err);
-        }
-      });
+      if (outputFilepath.includes('..')) {
+        logger.error('Invalid output filepath: path traversal not allowed', { outputFilepath });
+      } else {
+        fs.writeFile(outputFilepath, JSON.stringify(results[0]), err => {
+          if (err) {
+            logger.error('Failed to output file', err);
+          }
+        });
+      }
     }
   } catch (err) {
     if (shutdownTimeout) {
       clearTimeout(shutdownTimeout)
     }
     await closeBrowser(browser)
-    await chromiumBrowser.closeProxy()
+    await browserInstance?.closeProxy()
 
     logger.error('Failed to run executor', {
       errorMessage: err?.message || 'Unknown error',
@@ -207,7 +225,7 @@ process.on('unhandledRejection', (reason, p) => {
 
   clearTimeout(shutdownTimeout)
   await closeBrowser(browser)
-  await chromiumBrowser.closeProxy();
+  await browserInstance?.closeProxy();
 
   if (isSqs && message) {
     await sqsSender.deleteSQSMessage(message);
