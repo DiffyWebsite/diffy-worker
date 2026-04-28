@@ -182,7 +182,9 @@ process.on('unhandledRejection', (reason, p) => {
 
     logger.info('Start process', { message_body: data })
 
-    if (data.params.proxy) {
+    if (data.params.proxyUrl) {
+      proxy = data.params.proxyUrl;
+    } else if (data.params.proxy === true || (data.params.proxy && data.params.proxy.type === 'default')) {
       proxy = process.env.PROXY;
     }
 
