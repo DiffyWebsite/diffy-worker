@@ -29,11 +29,20 @@ RUN set -euxo pipefail; \
   fi
 
 # Install Node.js 22.5.1 from official distribution with checksum verification
-RUN curl -fsSLo /tmp/node.tar.gz "https://nodejs.org/dist/v22.5.1/node-v22.5.1-linux-x64.tar.gz" && \
-    curl -fsSLo /tmp/SHASUMS256.txt "https://nodejs.org/dist/v22.5.1/SHASUMS256.txt" && \
-    grep "node-v22.5.1-linux-x64.tar.gz" /tmp/SHASUMS256.txt | sha256sum -c - && \
-    tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && \
-    rm /tmp/node.tar.gz /tmp/SHASUMS256.txt
+ARG TARGETARCH
+RUN set -euxo pipefail; \
+    case "${TARGETARCH}" in \
+      amd64) NODE_ARCH=x64 ;; \
+      arm64) NODE_ARCH=arm64 ;; \
+      *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    NODE_TARBALL="node-v22.5.1-linux-${NODE_ARCH}.tar.gz"; \
+    cd /tmp && \
+    curl -fsSLO "https://nodejs.org/dist/v22.5.1/${NODE_TARBALL}" && \
+    curl -fsSLO "https://nodejs.org/dist/v22.5.1/SHASUMS256.txt" && \
+    grep " ${NODE_TARBALL}$" SHASUMS256.txt | sha256sum -c - && \
+    tar -xzf "${NODE_TARBALL}" -C /usr/local --strip-components=1 && \
+    rm "${NODE_TARBALL}" SHASUMS256.txt
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN set -euxo pipefail; \
