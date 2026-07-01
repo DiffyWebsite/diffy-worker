@@ -1,0 +1,24 @@
+{
+    "params": {
+        "id": 999001,
+        "project_id": 22441,
+        "url": "https:\/\/example.com",
+        "breakpoint": 1200,
+        "proxy": true,
+        "args": {
+            "disable_css_animation": true,
+            "stabilization": false,
+            "delay_before_screenshot": 0,
+            "workers_number": 1,
+            "delay_between_screenshots": null
+        },
+        "base_url": "https:\/\/example.com",
+        "user_id": 3380,
+        "user_email": "diffy.tutorials@diffy.website",
+        "basicAuth": {
+            "user": "",
+            "password": ""
+        },
+        "engine": "playwrightChrome131"
+    }
+}
