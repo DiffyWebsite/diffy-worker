@@ -2,7 +2,7 @@
     "params": {
         "id": 999001,
         "project_id": 22441,
-        "url": "https:\/\/example.com",
+        "url": "https://diffy.website/",
         "breakpoint": 1200,
         "proxy": true,
         "args": {
@@ -12,7 +12,7 @@
             "workers_number": 1,
             "delay_between_screenshots": null
         },
-        "base_url": "https:\/\/example.com",
+        "base_url": "https://diffy.website/",
         "user_id": 3380,
         "user_email": "diffy.tutorials@diffy.website",
         "basicAuth": {
