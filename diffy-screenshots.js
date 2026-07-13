@@ -87,7 +87,9 @@ process.on('unhandledRejection', async (reason, p) => {
 
       console.log(`Starting screenshot ${(index + 1)} of ${jobsList.length}`);
       const startTime = performance.now();
-      await exec('node ./index.js --env-file=.env --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
+      // The child inherits this process's env, so no --env-file is needed; passing one would
+      // make Node throw when the file is absent (e.g. invoked from another repo's cwd).
+      await exec('node ' + JSON.stringify(path.join(__dirname, 'index.js')) + ' --local=true --output-filepath=\'' + outputFilepath + '\' --file=\'' + inputFilepath + '\'', {stdio: 'inherit'});
       const duration = ((performance.now() - startTime) / 1000).toFixed(2);
       console.log(`Completed screenshot ${(index + 1)} of ${jobsList.length} in ${duration}s`);
 
