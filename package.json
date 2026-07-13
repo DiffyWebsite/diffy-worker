@@ -17,7 +17,6 @@
         "bluebird": "^3.7.2",
         "dotenv": "^17.2.3",
         "fs-extra": "^8.1.0",
-        "iltorb": "^2.4.4",
         "minimist": "^1.2.8",
         "playwright": "^1.56.0",
         "playwright-core": "^1.49.0",
@@ -25,13 +24,15 @@
         "playwright-extra-plugin-stealth": "^0.0.1",
         "process": "^0.11.10",
         "proxy-chain": "^2.4.0",
-        "request": "^2.88.2",
         "sharp": "^0.33.5",
         "striptags": "^3.2.0",
         "url-parse": "^1.4.3",
         "winston": "^3.17.0",
         "winston-daily-rotate-file": "^5.0.0",
         "yargs": "^15.1.0"
+    },
+    "optionalDependencies": {
+        "iltorb": "^2.4.4"
     },
     "devDependencies": {
         "eslint": "^8.26.0",
