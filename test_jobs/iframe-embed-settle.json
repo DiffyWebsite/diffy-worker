@@ -1,0 +1,23 @@
+{
+    "params": {
+        "id": 1,
+        "project_id": 1,
+        "url": "https:\/\/lvcinc.com\/inspections-and-testing\/",
+        "breakpoint": 1440,
+        "args": {
+            "disable_css_animation": true,
+            "stabilization": true,
+            "workers_number": 1,
+            "delay_between_screenshots": null
+        },
+        "base_url": "https:\/\/lvcinc.com",
+        "user_id": 1,
+        "user_email": "",
+        "basicAuth": {
+            "user": "",
+            "password": ""
+        },
+        "mhtml": 0,
+        "engine": "playwrightChrome131"
+    }
+}
