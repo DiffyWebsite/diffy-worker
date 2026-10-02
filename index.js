@@ -193,7 +193,7 @@ process.on('unhandledRejection', (reason, p) => {
     const baseHandler = Math.max(DEFAULT_TIMEOUT_MS, 5 * 60 * 1000 + extraBufferMs);
 
     scheduleShutdown(baseHandler);
-    browser = await browserInstance.getBrowser(proxy)
+    browser = await browserInstance.getBrowser(proxy, data.params)
     results = await run(message, browser, executor);
     // If we use local json file we are debugging.
     if (debug || jobFile || jobFileContent) {
