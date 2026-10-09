@@ -186,6 +186,12 @@ process.on('unhandledRejection', (reason, p) => {
       proxy = data.params.proxyUrl;
     } else if (data.params.proxy === true || (data.params.proxy && data.params.proxy.type === 'default')) {
       proxy = process.env.PROXY;
+
+      // Without this the job still succeeds, but it egresses from the worker's own IP instead of
+      // the shared one the customer allowlisted, and nothing says so.
+      if (!proxy) {
+        logger.warn('Job requested the default proxy but PROXY is not set; running direct')
+      }
     }
 
     const delaySec = Number(data?.params?.delay_before_screenshot || 0);
