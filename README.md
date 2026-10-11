@@ -29,6 +29,23 @@ To start an app with a test job without using the cloud (to save files locally)
 node --env-file=.env index.js --local=true --file=test_jobs/screenshot1.json
 ```
 
+### Priority queue fallback
+
+Workers normally poll only `JOB_QUEUE_NAME`. A worker can prefer that queue and
+borrow work from another queue when it is empty by setting
+`FALLBACK_JOB_QUEUE_NAME`:
+
+```dotenv
+JOB_QUEUE_NAME=BigSetScreenshotJobsChrome131
+FALLBACK_JOB_QUEUE_NAME=PlaywrightScreenshotJobsChrome131
+```
+
+The primary queue is checked at the start of every worker cycle. The fallback
+queue is polled only when the primary queue has no message. Completed messages
+are deleted from their source queue, and failed jobs are retried on that same
+queue. The worker's AWS identity therefore needs receive, delete, and send
+permissions for both queues.
+
 ### Release container to docker hub
 ```shell
 cd docker
@@ -147,4 +164,3 @@ advanced:
     stabilize: true
 </code>
 ```
-

@@ -2,16 +2,15 @@
 const process = require('process');
 const debug = !!process.env.DEBUG;
 
-const { Logger } = require('../lib/logger')
-const { SqsSender, maxAttempts } = require('../lib/sqsSender');
-
-const logger = new Logger(debug);
+const logger = require('../lib/logger')
+const { SqsSender } = require('../lib/sqsSender');
 
 (async () => {
-  const sqsSender = new SqsSender(true, false);
-  let messages = await sqsSender.fetchSQSJob();
-  logger.info('Received', messages);
+  const sqsSender = new SqsSender(debug, false);
+  const job = await sqsSender.fetchSQSJob();
+  logger.info('Received', job);
 
-  await sqsSender.deleteSQSMessage(messages[0]);
+  if (job) {
+    await sqsSender.deleteSQSMessage(job.message, job.queueURL);
+  }
 })()
-
