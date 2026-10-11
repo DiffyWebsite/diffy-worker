@@ -29,6 +29,16 @@ To start an app with a test job without using the cloud (to save files locally)
 node --env-file=.env index.js --local=true --file=test_jobs/screenshot1.json
 ```
 
+### Embedded iframes (forms, widgets)
+
+Before the final page height is measured the worker waits for web fonts inside every child
+iframe and dispatches a `resize` event there, so embeds that size themselves from inside an
+iframe (JotForm widgets, iframe-resizer, HubSpot forms) re-measure with their final fonts instead
+of keeping a height computed while the font was still loading. Every wait is capped, so the step
+adds about one second per screenshot and cannot stall a job.
+
+See `test_jobs/iframe-embed-settle.json` for a page that needs it.
+
 ### Priority queue fallback
 
 Workers normally poll only `JOB_QUEUE_NAME`. A worker can prefer that queue and
@@ -164,3 +174,4 @@ advanced:
     stabilize: true
 </code>
 ```
+
