@@ -36,6 +36,7 @@ const isSqs = !jobFile && !jobFileContent;
 const sqsSender = new SqsSender(debug, local);
 
 let message;
+let messageQueueURL;
 
 const fs = require('fs');
 // When manually passed json file to the script. Used for testing.
@@ -96,9 +97,10 @@ process.on('unhandledRejection', (reason, p) => {
 
 (async () => {
   if (isSqs) {
-    let messages = await sqsSender.fetchSQSJob();
-    if (messages) {
-      message = messages[0];
+    const fetchedJob = await sqsSender.fetchSQSJob();
+    if (fetchedJob) {
+      message = fetchedJob.message;
+      messageQueueURL = fetchedJob.queueURL;
     }
   }
 
@@ -111,7 +113,7 @@ process.on('unhandledRejection', (reason, p) => {
   let browserInstance = null
   let results = []
   let handlerTimeExecuteStart = performance.now();
-  const executor = new Executor(debug, local);
+  const executor = new Executor(debug, local, messageQueueURL);
 
   let shutdownTimeout = null;
   let shutdownDeadlineTs = handlerTimeExecuteStart + DEFAULT_TIMEOUT_MS;
@@ -236,7 +238,7 @@ process.on('unhandledRejection', (reason, p) => {
   await browserInstance?.closeProxy();
 
   if (isSqs && message) {
-    await sqsSender.deleteSQSMessage(message);
+    await sqsSender.deleteSQSMessage(message, messageQueueURL);
   }
 })()
 
