@@ -18,6 +18,6 @@
             "password": ""
         },
         "mhtml": 0,
-        "engine": "playwrightChrome131"
+        "engine": "chrome158"
     }
 }

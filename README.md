@@ -46,8 +46,8 @@ borrow work from another queue when it is empty by setting
 `FALLBACK_JOB_QUEUE_NAME`:
 
 ```dotenv
-JOB_QUEUE_NAME=BigSetScreenshotJobsChrome131
-FALLBACK_JOB_QUEUE_NAME=PlaywrightScreenshotJobsChrome131
+JOB_QUEUE_NAME=ScreenshotJobsChrome158
+FALLBACK_JOB_QUEUE_NAME=<queue to borrow from when the primary is empty>
 ```
 
 The primary queue is checked at the start of every worker cycle. The fallback
@@ -86,10 +86,15 @@ docker buildx rm multi-platform-builder
 
 ### Chrome
 
-To install specific version of Chromium
-https://www.chromium.org/getting-involved/download-chromium/
+Production workers and the Docker image run Chrome for Testing 158.0.8127.36 at
+`/usr/bin/chromium-browser`, driven by Playwright 1.65.0 (bundled Chromium 158).
+Downloads: https://googlechromelabs.github.io/chrome-for-testing/
 
-Chromium 136 installed as part of Ubuntu 24.04.
+When upgrading Chrome, change these together:
+- the Chrome for Testing build on the servers and `CHROME_VERSION` in `docker/Dockerfile`
+- `playwright` / `playwright-core` in `package.json` (pin the release whose bundled Chromium
+  has the same major; check `browsers.json` in the package) and `playwright@` in the Dockerfile
+- the `Chrome/<major>.0.0.0` default user agent in `lib/func.js`
 
 Create a job in SQS. Once created edit it and clear "Access policy" section. 
 

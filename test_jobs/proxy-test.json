@@ -19,6 +19,6 @@
             "user": "",
             "password": ""
         },
-        "engine": "playwrightChrome131"
+        "engine": "chrome158"
     }
 }
